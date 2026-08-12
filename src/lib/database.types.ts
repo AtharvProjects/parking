@@ -3,9 +3,34 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export interface Database {
   public: {
     Tables: {
+      companies: {
+        Row: {
+          id: string;
+          name: string;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [];
+      };
       sites: {
         Row: {
           id: string;
+          company_id: string;
           name: string;
           brand_name: string | null;
           address: string;
@@ -25,6 +50,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          company_id?: string;
           name?: string;
           brand_name?: string | null;
           address?: string;
@@ -44,6 +70,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          company_id?: string;
           name?: string;
           brand_name?: string | null;
           address?: string;
@@ -61,10 +88,12 @@ export interface Database {
           updated_at?: string;
           deleted_at?: string | null;
         };
+        Relationships: [];
       };
       employees: {
         Row: {
           id: string;
+          company_id: string;
           site_id: string;
           auth_user_id: string | null;
           name: string;
@@ -82,6 +111,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          company_id?: string;
           site_id?: string;
           auth_user_id?: string | null;
           name?: string;
@@ -99,6 +129,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          company_id?: string;
           site_id?: string;
           auth_user_id?: string | null;
           name?: string;
@@ -114,10 +145,12 @@ export interface Database {
           updated_at?: string;
           deleted_at?: string | null;
         };
+        Relationships: [];
       };
       rate_cards: {
         Row: {
           id: string;
+          company_id: string;
           site_id: string;
           vehicle_type: VehicleType;
           hourly_rate: number;
@@ -130,6 +163,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          company_id?: string;
           site_id?: string;
           vehicle_type?: VehicleType;
           hourly_rate?: number;
@@ -142,6 +176,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          company_id?: string;
           site_id?: string;
           vehicle_type?: VehicleType;
           hourly_rate?: number;
@@ -152,10 +187,12 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       parking_sessions: {
         Row: {
           id: string;
+          company_id: string;
           site_id: string;
           vehicle_number: string;
           vehicle_type: VehicleType;
@@ -176,6 +213,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          company_id?: string;
           site_id?: string;
           vehicle_number?: string;
           vehicle_type?: VehicleType;
@@ -196,6 +234,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          company_id?: string;
           site_id?: string;
           vehicle_number?: string;
           vehicle_type?: VehicleType;
@@ -214,6 +253,7 @@ export interface Database {
           updated_at?: string;
           deleted_at?: string | null;
         };
+        Relationships: [];
       };
       payments: {
         Row: {
@@ -261,6 +301,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       audit_logs: {
         Row: {
@@ -293,6 +334,7 @@ export interface Database {
           ip_address?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
     };
     Views: {

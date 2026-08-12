@@ -3,6 +3,8 @@ import "./globals.css";
 import { ThemeProvider } from "@/providers/theme-provider";
 import { QueryProvider } from "@/providers/query-provider";
 import { AuthProvider } from "@/providers/auth-provider";
+import { DatabaseProvider } from "@/providers/database-provider";
+import { SiteProvider } from "@/providers/site-provider";
 
 export const metadata: Metadata = {
   title: "THE EAST PALACE | Parking Management",
@@ -26,10 +28,15 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <ThemeProvider>
           <AuthProvider>
-            <QueryProvider>{children}</QueryProvider>
+            <DatabaseProvider>
+              <QueryProvider>
+                <SiteProvider>{children}</SiteProvider>
+              </QueryProvider>
+            </DatabaseProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>
     </html>
   );
 }
+

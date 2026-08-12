@@ -1,56 +1,48 @@
-import { supabase } from '@/lib/supabase';
-import type { Employee } from '@/lib/database.types';
-import type { CreateEmployeeInput } from '@/lib/validators';
+import { EmployeeRepository } from '@/database/repositories/EmployeeRepository';
+import type { EmployeeRole, ShiftType } from '@/lib/database.types';
 
 export const employeesService = {
-  async getAll(siteId?: string): Promise<Employee[]> {
-    let query = supabase
-      .from('employees')
-      .select('*')
-      .is('deleted_at', null)
-      .order('name');
-
-    if (siteId && siteId !== 'ALL') query = query.eq('site_id', siteId);
-
-    const { data, error } = await query;
-    if (error) throw error;
-    return data || [];
+  get companyId() {
+    return localStorage.getItem('company_id') || '';
   },
 
-  async create(siteId: string, input: CreateEmployeeInput): Promise<Employee> {
-    const { data, error } = await supabase
-      .from('employees')
-      .insert({ ...input, site_id: siteId })
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
+  async getAll(siteId?: string) {
+    if (!siteId) return [];
+    return EmployeeRepository.getEmployeesBySite(this.companyId, siteId);
   },
 
-  async update(id: string, input: Partial<CreateEmployeeInput>): Promise<Employee> {
-    const { data, error } = await supabase
-      .from('employees')
-      .update(input)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
+  async getAllByCompany() {
+    return EmployeeRepository.getAllByCompany(this.companyId);
+  },
+
+  async create(siteId: string, data: {
+    name: string;
+    mobile: string;
+    email?: string;
+    role: EmployeeRole;
+    shift?: ShiftType;
+    pin?: string;
+  }) {
+    return EmployeeRepository.create(this.companyId, { ...data, site_id: siteId });
+  },
+
+  async update(id: string, data: {
+    name?: string;
+    mobile?: string;
+    email?: string;
+    role?: EmployeeRole;
+    shift?: ShiftType | null;
+    site_id?: string;
+    pin?: string;
+  }) {
+    return EmployeeRepository.update(this.companyId, id, data);
   },
 
   async toggleActive(id: string, active: boolean) {
-    const { error } = await supabase
-      .from('employees')
-      .update({ active })
-      .eq('id', id);
-    if (error) throw error;
+    return EmployeeRepository.toggleActive(this.companyId, id, active);
   },
 
   async delete(id: string) {
-    const { error } = await supabase
-      .from('employees')
-      .update({ deleted_at: new Date().toISOString(), active: false })
-      .eq('id', id);
-    if (error) throw error;
-  },
+    return EmployeeRepository.softDelete(this.companyId, id);
+  }
 };

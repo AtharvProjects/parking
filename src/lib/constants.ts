@@ -85,3 +85,23 @@ export const BUSINESS_NAME = 'Sant Wamanbhau Parking';
 // ─── VALIDATION ──────────────────────────────────────────
 
 export const INDIAN_PLATE_REGEX = /^[A-Z]{2}[\s-]?\d{1,2}[\s-]?[A-Z]{0,3}[\s-]?\d{1,4}$/;
+
+// ─── ROLE-BASED ACCESS CONTROL ──────────────────────────────
+
+export type AppFeature = 'DASHBOARD' | 'GATE_ENTRY' | 'GATE_EXIT' | 'VEHICLES' | 'SEARCH' | 'REPORTS' | 'SETTINGS' | 'EMPLOYEES' | 'SITES';
+
+export const ROLE_PERMISSIONS: Record<EmployeeRole, AppFeature[]> = {
+  SUPER_ADMIN:    ['DASHBOARD', 'GATE_ENTRY', 'GATE_EXIT', 'VEHICLES', 'SEARCH', 'REPORTS', 'SETTINGS', 'EMPLOYEES', 'SITES'],
+  ADMIN:          ['DASHBOARD', 'GATE_ENTRY', 'GATE_EXIT', 'VEHICLES', 'SEARCH', 'REPORTS', 'SETTINGS', 'EMPLOYEES', 'SITES'],
+  MANAGER:        ['DASHBOARD', 'GATE_ENTRY', 'GATE_EXIT', 'VEHICLES', 'SEARCH', 'REPORTS', 'EMPLOYEES'],
+  OPERATOR:       ['DASHBOARD', 'GATE_ENTRY', 'GATE_EXIT', 'VEHICLES', 'SEARCH'],
+  GATE_ATTENDANT: ['DASHBOARD', 'GATE_ENTRY', 'GATE_EXIT', 'VEHICLES'],
+  ACCOUNTANT:     ['DASHBOARD', 'SEARCH', 'REPORTS'],
+  VIEWER:         ['DASHBOARD'],
+};
+
+export const hasPermission = (role: EmployeeRole | undefined, feature: AppFeature): boolean => {
+  if (!role) return false;
+  return ROLE_PERMISSIONS[role]?.includes(feature) ?? false;
+};
+

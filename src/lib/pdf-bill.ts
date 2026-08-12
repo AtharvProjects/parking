@@ -17,7 +17,6 @@ export interface PdfBillSessionData {
   paymentMethod?: string | null;
   paymentStatus?: string | null;
   receiptNumber?: string | null;
-  receiptNumber?: string | null;
   entryOperatorName?: string | null;
   exitOperatorName?: string | null;
   site?: any; // To avoid circular dependency with database.types.ts
@@ -158,21 +157,26 @@ export async function generatePdfBill(
     };
     
     printRow("Receipt No:", recNo);
+    printRow("Date:", formatDateIST(session.exitAt || session.entryAt));
     printRow("Vehicle No:", session.vehicleNumber.toUpperCase());
     printRow("Category:", vConfig?.label || session.vehicleType);
     if (session.driverNumber) {
       printRow("Driver Phone:", session.driverNumber);
     }
-    printRow("Entry Time:", formatTimeIST(session.entryAt));
+    printRow("Entry:", `${formatDateIST(session.entryAt)} ${formatTimeIST(session.entryAt)}`);
     if (type === "exit") {
-      printRow("Exit Time:", session.exitAt ? formatTimeIST(session.exitAt) : "Active");
+      printRow("Exit:", session.exitAt ? `${formatDateIST(session.exitAt)} ${formatTimeIST(session.exitAt)}` : "Active");
       printRow("Duration:", humanizeDuration(durationMin));
+      if (session.exitOperatorName || session.entryOperatorName) {
+        printRow("Operator:", session.exitOperatorName || session.entryOperatorName || "Staff");
+      }
       
       y += 2;
       doc.setLineDashPattern([1, 1], 0);
       doc.line(5, y, pageWidth - 5, y);
       doc.setLineDashPattern([], 0);
       y += 6;
+
       
       const hoursBillable = Math.max(1, Math.ceil(durationMin / 60));
       printRow("Parking Rate:", `${hoursBillable} hr(s)`);

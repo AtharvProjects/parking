@@ -201,3 +201,39 @@ export function percentChange(oldVal: number, newVal: number): number {
   if (oldVal === 0) return newVal > 0 ? 100 : 0;
   return ((newVal - oldVal) / oldVal) * 100;
 }
+
+// ─── LOCAL TIME / IST DATE BOUNDS ────────────────────────
+
+/**
+ * Convert a YYYY-MM-DD string into start-of-day (00:00:00.000) or end-of-day (23:59:59.999) ISO string in local time.
+ */
+export function getLocalISOBounds(dateStr: string, isEnd = false): string {
+  if (!dateStr) {
+    const now = new Date();
+    return isEnd
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString()
+      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+  }
+  if (dateStr.includes("T")) return new Date(dateStr).toISOString();
+
+  const [yearStr, monthStr, dayStr] = dateStr.split("-");
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10) - 1;
+  const day = parseInt(dayStr, 10);
+
+  if (isEnd) {
+    return new Date(year, month, day, 23, 59, 59, 999).toISOString();
+  }
+  return new Date(year, month, day, 0, 0, 0, 0).toISOString();
+}
+
+/**
+ * Get today's local date string formatted as YYYY-MM-DD for date inputs.
+ */
+export function getTodayDateString(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+

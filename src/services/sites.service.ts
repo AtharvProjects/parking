@@ -1,49 +1,46 @@
-import { supabase } from '@/lib/supabase';
+import { SiteRepository } from '@/database/repositories/SiteRepository';
 import type { Site } from '@/lib/database.types';
 
 export const sitesService = {
-  async getAll(): Promise<Site[]> {
-    const { data, error } = await supabase
-      .from('sites')
-      .select('*')
-      .is('deleted_at', null)
-      .order('name');
-
-    if (error) throw error;
-    return data || [];
+  get companyId() {
+    return localStorage.getItem('company_id') || '';
   },
 
-  async getById(id: string): Promise<Site | null> {
-    const { data, error } = await supabase
-      .from('sites')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data;
+  async getAll() {
+    return SiteRepository.getSites(this.companyId);
   },
 
-  async update(id: string, updates: Partial<Site>): Promise<Site> {
-    const { data, error } = await supabase
-      .from('sites')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
+  async getAuthorizedSites(employee: { id: string; role: string; site_id: string; company_id?: string }) {
+    const compId = employee.company_id || this.companyId;
+    return SiteRepository.getAuthorizedSites(compId, employee.id, employee.role, employee.site_id);
   },
 
-  async create(input: { name: string; address?: string; city?: string }): Promise<Site> {
-    const { data, error } = await supabase
-      .from('sites')
-      .insert(input)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
+  async getById(id: string) {
+    return SiteRepository.getById(this.companyId, id);
   },
+
+  async create(data: {
+    name: string;
+    brand_name?: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    total_slots?: number;
+    grace_period_minutes?: number;
+    rounding_interval_min?: number;
+    day_rate_switchover_hrs?: number;
+    overstay_alert_hrs?: number;
+    daily_revenue_target?: number;
+    contact_number?: string;
+  }) {
+    return SiteRepository.create(this.companyId, data);
+  },
+
+  async update(siteId: string, data: Partial<Site>) {
+    return SiteRepository.update(this.companyId, siteId, data);
+  },
+
+  async delete(siteId: string) {
+    return SiteRepository.softDelete(this.companyId, siteId);
+  }
 };

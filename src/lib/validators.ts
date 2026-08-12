@@ -67,13 +67,15 @@ export const loginSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
-export type LoginInput = z.infer<typeof loginSchema>;
-
-export const signupSchema = loginSchema.extend({
-  confirm_password: z.string().min(6),
-}).refine((data) => data.password === data.confirm_password, {
-  message: 'Passwords do not match',
-  path: ['confirm_password'],
+export const pinLoginSchema = z.object({
+  identifier: z.string().min(3, 'Enter mobile number or staff ID'),
+  pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4 to 6 digits'),
 });
 
-export type SignupInput = z.infer<typeof signupSchema>;
+export type PinLoginInput = z.infer<typeof pinLoginSchema>;
+
+export const resetPasswordSchema = z.object({
+  email: z.string().email('Please enter a valid email address'),
+});
+
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
