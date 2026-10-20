@@ -56,6 +56,7 @@ export class SessionRepository {
         vehicle_number: s.vehicle_number,
         vehicle_type: s.vehicle_type as VehicleType,
         driver_number: s.driver_number,
+        driver_name: s.driver_name || null,
         notes: s.notes,
         entry_at: s.entry_at,
         entry_operator_name: s.entry_operator_name || 'Unknown',
@@ -75,6 +76,7 @@ export class SessionRepository {
     vehicle_number: string;
     vehicle_type: VehicleType;
     driver_number: string;
+    driver_name?: string | null;
     notes?: string;
     vehicle_photos?: { front?: string; rear?: string };
     entry_operator_id: string;
@@ -119,14 +121,14 @@ export class SessionRepository {
 
     const query = `
       INSERT INTO parking_sessions (
-        id, company_id, site_id, vehicle_number, vehicle_type, driver_number, notes,
+        id, company_id, site_id, vehicle_number, vehicle_type, driver_number, driver_name, notes,
         vehicle_photos, entry_at, entry_operator_id, rate_card_id, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
     `;
     
     const params = [
       data.id, data.company_id, data.site_id, data.vehicle_number, data.vehicle_type,
-      data.driver_number, data.notes || null, 
+      data.driver_number, data.driver_name || null, data.notes || null, 
       Object.keys(finalPhotos).length > 0 ? JSON.stringify(finalPhotos) : null,
       now, data.entry_operator_id, data.rate_card_id, now, now
     ];
@@ -135,13 +137,13 @@ export class SessionRepository {
     
     // Queue Sync Job
     await SyncQueue.enqueue('parking_sessions', 'INSERT', {
-      ...data, vehicle_photos: finalPhotos, entry_at: now, status: 'ACTIVE', created_at: now, updated_at: now
+      ...data, driver_name: data.driver_name || null, vehicle_photos: finalPhotos, entry_at: now, status: 'ACTIVE', created_at: now, updated_at: now
     });
     
     // Trigger immediate background sync push
     SyncEngine.triggerPush().catch(() => {});
 
-    return { ...data, vehicle_photos: finalPhotos, entry_at: now, status: 'ACTIVE', created_at: now, updated_at: now } as any;
+    return { ...data, driver_name: data.driver_name || null, vehicle_photos: finalPhotos, entry_at: now, status: 'ACTIVE', created_at: now, updated_at: now } as any;
   }
 
   static async processExit(
@@ -265,9 +267,9 @@ export class SessionRepository {
       LEFT JOIN employees e2 ON s.exit_operator_id = e2.id
       LEFT JOIN payments p ON s.id = p.session_id
       WHERE s.company_id = ? AND s.deleted_at IS NULL 
-        AND (s.vehicle_number LIKE ? OR s.driver_number LIKE ? OR p.receipt_number LIKE ? OR s.entry_at LIKE ?)
+        AND (s.vehicle_number LIKE ? OR s.driver_number LIKE ? OR s.driver_name LIKE ? OR p.receipt_number LIKE ? OR s.entry_at LIKE ?)
     `;
-    const params: any[] = [companyId, q, q, q, q];
+    const params: any[] = [companyId, q, q, q, q, q];
 
     if (!isAllSites) {
       queryStr += ` AND s.site_id = ?`;
@@ -298,6 +300,7 @@ export class SessionRepository {
 
       return {
         ...row,
+        driver_name: row.driver_name || null,
         vehicle_photos: photos,
         entry_operator: { name: row.entry_operator_name },
         exit_operator: row.exit_operator_name ? { name: row.exit_operator_name } : undefined,
@@ -345,13 +348,14 @@ export class SessionRepository {
             sessionStmts.push({
               statement: `
                 INSERT INTO parking_sessions (
-                  id, company_id, site_id, vehicle_number, vehicle_type, driver_number, 
+                  id, company_id, site_id, vehicle_number, vehicle_type, driver_number, driver_name,
                   notes, vehicle_photos, entry_at, entry_operator_id, rate_card_id, 
                   status, created_at, updated_at, exit_at, exit_operator_id, 
                   duration_minutes, gross_amount, deleted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET 
                   status=excluded.status, 
+                  driver_name=excluded.driver_name,
                   updated_at=excluded.updated_at,
                   exit_at=excluded.exit_at,
                   exit_operator_id=excluded.exit_operator_id,
@@ -360,7 +364,7 @@ export class SessionRepository {
                   deleted_at=excluded.deleted_at
               `,
               values: [
-                s.id, s.company_id, s.site_id, s.vehicle_number, s.vehicle_type, s.driver_number,
+                s.id, s.company_id, s.site_id, s.vehicle_number, s.vehicle_type, s.driver_number, s.driver_name || null,
                 s.notes, s.vehicle_photos ? JSON.stringify(s.vehicle_photos) : null,
                 s.entry_at, s.entry_operator_id, s.rate_card_id, s.status,
                 s.created_at, s.updated_at, s.exit_at, s.exit_operator_id,

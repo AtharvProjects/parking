@@ -1,46 +1,41 @@
-import { SiteRepository } from '@/database/repositories/SiteRepository';
+/**
+ * Sites Service — Thin adapter using Supabase-direct operations.
+ */
+import { supabaseSitesService } from '@/services/supabase-sites.service';
 import type { Site } from '@/lib/database.types';
 
+function getCompanyId(): string {
+  return typeof window !== 'undefined'
+    ? localStorage.getItem('company_id') || '00000000-0000-0000-0000-000000000000'
+    : '00000000-0000-0000-0000-000000000000';
+}
+
 export const sitesService = {
-  get companyId() {
-    return localStorage.getItem('company_id') || '';
+  async getAll(): Promise<Site[]> {
+    return supabaseSitesService.getAll(getCompanyId());
   },
 
-  async getAll() {
-    return SiteRepository.getSites(this.companyId);
+  async getAuthorizedSites(): Promise<Site[]> {
+    return supabaseSitesService.getAuthorizedSites(getCompanyId());
   },
 
-  async getAuthorizedSites(employee: { id: string; role: string; site_id: string; company_id?: string }) {
-    const compId = employee.company_id || this.companyId;
-    return SiteRepository.getAuthorizedSites(compId, employee.id, employee.role, employee.site_id);
+  async getById(siteId: string): Promise<Site | null> {
+    return supabaseSitesService.getById(getCompanyId(), siteId);
   },
 
-  async getById(id: string) {
-    return SiteRepository.getById(this.companyId, id);
+  async create(data: Parameters<typeof supabaseSitesService.create>[1]): Promise<Site> {
+    return supabaseSitesService.create(getCompanyId(), data);
   },
 
-  async create(data: {
-    name: string;
-    brand_name?: string;
-    address?: string;
-    city?: string;
-    state?: string;
-    total_slots?: number;
-    grace_period_minutes?: number;
-    rounding_interval_min?: number;
-    day_rate_switchover_hrs?: number;
-    overstay_alert_hrs?: number;
-    daily_revenue_target?: number;
-    contact_number?: string;
-  }) {
-    return SiteRepository.create(this.companyId, data);
+  async update(siteId: string, data: Partial<Site>): Promise<void> {
+    return supabaseSitesService.update(getCompanyId(), siteId, data);
   },
 
-  async update(siteId: string, data: Partial<Site>) {
-    return SiteRepository.update(this.companyId, siteId, data);
+  async softDelete(siteId: string): Promise<void> {
+    return supabaseSitesService.softDelete(getCompanyId(), siteId);
   },
 
-  async delete(siteId: string) {
-    return SiteRepository.softDelete(this.companyId, siteId);
-  }
+  async delete(siteId: string): Promise<void> {
+    return supabaseSitesService.softDelete(getCompanyId(), siteId);
+  },
 };

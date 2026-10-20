@@ -3,12 +3,14 @@ import autoTable from "jspdf-autotable";
 import html2canvas from "html2canvas";
 import { formatTimeIST, formatDateIST, humanizeDuration, numberToWordsINR } from "./formatters";
 import { VEHICLE_TYPE_CONFIG, UPI_CONFIG } from "./constants";
+import { getDictionary, type Language } from "./i18n";
 
 export interface PdfBillSessionData {
   id: string;
   vehicleNumber: string;
   vehicleType: string;
   driverNumber: string;
+  driverName?: string | null;
   notes?: string | null;
   entryAt: string;
   exitAt?: string | null;
@@ -90,8 +92,10 @@ export async function generatePdfBill(
   session: PdfBillSessionData, 
   returnFileOnly?: boolean | "base64",
   layout: "a4" | "thermal" = "a4",
-  type: "entry" | "exit" = "exit"
+  type: "entry" | "exit" = "exit",
+  lang: Language = "en"
 ): Promise<File | string | void> {
+  const dict = getDictionary(lang);
   const isThermal = layout === "thermal";
   const doc = new jsPDF({
     orientation: "portrait",
@@ -113,7 +117,7 @@ export async function generatePdfBill(
     doc.setTextColor(0, 0, 0);
     doc.text(brandName.toUpperCase(), pageWidth / 2, y, { align: "center" });
     y += 5;
-    doc.text("PARKING", pageWidth / 2, y, { align: "center" });
+    doc.text(dict.pdf.parking.toUpperCase(), pageWidth / 2, y, { align: "center" });
     
     y += 5;
     doc.setFont("helvetica", "normal");
@@ -122,7 +126,7 @@ export async function generatePdfBill(
     doc.text(addressLine, pageWidth / 2, y, { align: "center" });
     y += 4;
     const contactNo = session.site?.contact_number || UPI_CONFIG.mobile;
-    doc.text(`Helpline: ${contactNo}`, pageWidth / 2, y, { align: "center" });
+    doc.text(`${dict.pdf.helpline} ${contactNo}`, pageWidth / 2, y, { align: "center" });
     
     y += 6;
     doc.setLineDashPattern([1, 1], 0);
@@ -132,7 +136,7 @@ export async function generatePdfBill(
     y += 6;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text(`PARKING ${type === "entry" ? "ENTRY TICKET" : "EXIT RECEIPT"}`, pageWidth / 2, y, { align: "center" });
+    doc.text(type === "entry" ? dict.pdf.entryTicket.toUpperCase() : dict.pdf.exitReceipt.toUpperCase(), pageWidth / 2, y, { align: "center" });
     
     y += 4;
     doc.setLineDashPattern([1, 1], 0);
@@ -156,19 +160,22 @@ export async function generatePdfBill(
       y += 6;
     };
     
-    printRow("Receipt No:", recNo);
-    printRow("Date:", formatDateIST(session.exitAt || session.entryAt));
-    printRow("Vehicle No:", session.vehicleNumber.toUpperCase());
-    printRow("Category:", vConfig?.label || session.vehicleType);
-    if (session.driverNumber) {
-      printRow("Driver Phone:", session.driverNumber);
+    printRow(dict.pdf.receiptNo, recNo);
+    printRow(dict.pdf.date, formatDateIST(session.exitAt || session.entryAt));
+    printRow(dict.pdf.vehicleNo, session.vehicleNumber.toUpperCase());
+    printRow(dict.pdf.category, vConfig?.label || session.vehicleType);
+    if (session.driverName) {
+      printRow(dict.pdf.driverName, session.driverName);
     }
-    printRow("Entry:", `${formatDateIST(session.entryAt)} ${formatTimeIST(session.entryAt)}`);
+    if (session.driverNumber) {
+      printRow(dict.pdf.driverPhone, session.driverNumber);
+    }
+    printRow(dict.pdf.entry, `${formatDateIST(session.entryAt)} ${formatTimeIST(session.entryAt)}`);
     if (type === "exit") {
-      printRow("Exit:", session.exitAt ? `${formatDateIST(session.exitAt)} ${formatTimeIST(session.exitAt)}` : "Active");
-      printRow("Duration:", humanizeDuration(durationMin));
+      printRow(dict.pdf.exit, session.exitAt ? `${formatDateIST(session.exitAt)} ${formatTimeIST(session.exitAt)}` : dict.common.active);
+      printRow(dict.pdf.duration, humanizeDuration(durationMin));
       if (session.exitOperatorName || session.entryOperatorName) {
-        printRow("Operator:", session.exitOperatorName || session.entryOperatorName || "Staff");
+        printRow(dict.pdf.operator, session.exitOperatorName || session.entryOperatorName || dict.common.staff);
       }
       
       y += 2;
@@ -179,20 +186,20 @@ export async function generatePdfBill(
 
       
       const hoursBillable = Math.max(1, Math.ceil(durationMin / 60));
-      printRow("Parking Rate:", `${hoursBillable} hr(s)`);
+      printRow(dict.pdf.parkingRate, `${hoursBillable} ${dict.pdf.hours}`);
       
       doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
-      doc.text("TOTAL CHARGES:", 5, y);
+      doc.text(dict.pdf.totalCharges, 5, y);
       doc.text(`Rs. ${amountRs}`, pageWidth - 5, y, { align: "right" });
       y += 8;
       
       doc.setFontSize(7);
       doc.setFont("helvetica", "normal");
-      doc.text(`In Words: ${numberToWordsINR(amountRs)}`, 5, y);
+      doc.text(`${dict.pdf.inWords} ${numberToWordsINR(amountRs)}`, 5, y);
       y += 5;
-      doc.text(`Payment Mode: ${session.paymentMethod || "UPI"}`, 5, y);
-      doc.text(`Status: ${session.paymentStatus || "PAID"}`, pageWidth - 5, y, { align: "right" });
+      doc.text(`${dict.pdf.paymentMode} ${session.paymentMethod || "UPI"}`, 5, y);
+      doc.text(`${dict.common.status}: ${session.paymentStatus || "PAID"}`, pageWidth - 5, y, { align: "right" });
       
       y += 6;
     } else {
@@ -200,15 +207,15 @@ export async function generatePdfBill(
       y += 4;
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
-      doc.text("Please keep this ticket safe.", pageWidth / 2, y, { align: "center" });
+      doc.text(dict.pdf.keepTicketSafe, pageWidth / 2, y, { align: "center" });
       y += 4;
-      doc.text("Applicable parking charges will be", pageWidth / 2, y, { align: "center" });
+      doc.text(dict.pdf.chargesAtExit, pageWidth / 2, y, { align: "center" });
       y += 4;
-      doc.text("calculated at the time of exit.", pageWidth / 2, y, { align: "center" });
+      doc.text(dict.pdf.calculatedAtExit, pageWidth / 2, y, { align: "center" });
       y += 8;
     }
     doc.setFontSize(7);
-    doc.text("Thank you for visiting!", pageWidth / 2, y, { align: "center" });
+    doc.text(dict.pdf.thankYou, pageWidth / 2, y, { align: "center" });
     
     const filename = `parking-bill-${session.vehicleNumber.toUpperCase()}-${session.id.slice(-6)}.pdf`;
     if (returnFileOnly === "base64") {
@@ -243,7 +250,7 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(17);
   doc.setTextColor(255, 255, 255);
-  doc.text(`${brandName.toUpperCase()} PARKING`, 44, 19);
+  doc.text(`${brandName.toUpperCase()} ${dict.pdf.parking.toUpperCase()}`, 44, 19);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
@@ -252,7 +259,7 @@ export async function generatePdfBill(
   doc.text(addressLine, 44, 23);
   doc.text(`UPI VPA: ${UPI_CONFIG.vpa}`, 44, 29);
   const contactNo = session.site?.contact_number || UPI_CONFIG.mobile;
-  doc.text(`Helpline: ${contactNo}`, 44, 35);
+  doc.text(`${dict.pdf.helpline} ${contactNo}`, 44, 35);
 
   // Receipt Badge Box
   const recNo = session.receiptNumber || `SWP-${session.id.slice(-6).toUpperCase()}`;
@@ -263,7 +270,7 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10.5);
   doc.setTextColor(59, 130, 246);
-  doc.text("TAX INVOICE & RECEIPT", pageWidth - 42, 17, { align: "center" });
+  doc.text(dict.pdf.taxInvoice, pageWidth - 42, 17, { align: "center" });
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
@@ -273,7 +280,7 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(148, 163, 184);
-  doc.text("ORIGINAL DOCUMENT", pageWidth - 42, 30, { align: "center" });
+  doc.text(dict.pdf.originalDocument, pageWidth - 42, 30, { align: "center" });
 
   // ─── 2. SUB-BAR METADATA ──────────────────────────────────
   let y = 53;
@@ -284,9 +291,9 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(51, 65, 85);
-  doc.text(`Issued Date: ${formatDateIST(session.exitAt || session.entryAt)} ${formatTimeIST(session.exitAt || session.entryAt)}`, 18, y + 6.5);
-  doc.text(`Status: ${(session.paymentStatus || "PAID").toUpperCase()}`, pageWidth / 2, y + 6.5, { align: "center" });
-  doc.text(`Payment Mode: ${(session.paymentMethod || "CASH").toUpperCase()}`, pageWidth - 18, y + 6.5, { align: "right" });
+  doc.text(`${dict.pdf.issuedDate} ${formatDateIST(session.exitAt || session.entryAt)} ${formatTimeIST(session.exitAt || session.entryAt)}`, 18, y + 6.5);
+  doc.text(`${dict.common.status}: ${(session.paymentStatus || "PAID").toUpperCase()}`, pageWidth / 2, y + 6.5, { align: "center" });
+  doc.text(`${dict.pdf.paymentMode} ${(session.paymentMethod || "CASH").toUpperCase()}`, pageWidth - 18, y + 6.5, { align: "right" });
 
   y += 16;
 
@@ -306,14 +313,14 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
   doc.setTextColor(30, 41, 59);
-  doc.text("VEHICLE & DRIVER DETAILS", 18, y + 6.5);
+  doc.text(dict.pdf.vehicleDriverDetails, 18, y + 6.5);
 
   const vConfig = VEHICLE_TYPE_CONFIG[session.vehicleType as keyof typeof VEHICLE_TYPE_CONFIG];
 
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text("Vehicle Number:", 18, y + 17);
+  doc.text(dict.pdf.vehicleNumber, 18, y + 17);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
@@ -322,24 +329,28 @@ export async function generatePdfBill(
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text("Category:", 18, y + 25);
+  doc.text(dict.pdf.categoryLabel, 18, y + 25);
   doc.setFont("helvetica", "semibold");
   doc.setTextColor(15, 23, 42);
   doc.text(vConfig?.label || session.vehicleType, 52, y + 25);
 
+  doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text("Driver Contact:", 18, y + 33);
+  doc.text(dict.pdf.driverPhoneLabel, 18, y + 33);
   doc.setFont("helvetica", "medium");
   doc.setTextColor(15, 23, 42);
-  doc.text(session.driverNumber || "N/A", 52, y + 33);
+  const driverDisplay = session.driverName 
+    ? (session.driverNumber ? `${session.driverName} (${session.driverNumber})` : session.driverName)
+    : (session.driverNumber || "N/A");
+  doc.text(driverDisplay, 52, y + 33);
 
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text("Remarks / Notes:", 18, y + 41);
+  doc.text(dict.pdf.remarksNotes, 18, y + 41);
   doc.setFont("helvetica", "medium");
   doc.setTextColor(15, 23, 42);
-  doc.text(session.notes ? (session.notes.length > 22 ? session.notes.slice(0, 20) + "..." : session.notes) : "None", 52, y + 41);
+  doc.text(session.notes ? (session.notes.length > 22 ? session.notes.slice(0, 20) + "..." : session.notes) : dict.common.none, 52, y + 41);
 
   // Right Card
   const rightX = 108;
@@ -353,37 +364,37 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
   doc.setTextColor(30, 41, 59);
-  doc.text("SESSION TIMING & STAFF", rightX + 4, y + 6.5);
+  doc.text(dict.pdf.sessionTimingStaff, rightX + 4, y + 6.5);
 
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text("Entry Time:", rightX + 4, y + 17);
+  doc.text(dict.pdf.entryTime, rightX + 4, y + 17);
   doc.setFont("helvetica", "medium");
   doc.setTextColor(15, 23, 42);
   doc.text(`${formatDateIST(session.entryAt)} ${formatTimeIST(session.entryAt)}`, rightX + 38, y + 17);
 
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text("Exit Time:", rightX + 4, y + 25);
+  doc.text(dict.pdf.exitTime, rightX + 4, y + 25);
   doc.setFont("helvetica", "medium");
   doc.setTextColor(15, 23, 42);
-  doc.text(session.exitAt ? `${formatDateIST(session.exitAt)} ${formatTimeIST(session.exitAt)}` : "Active", rightX + 38, y + 25);
+  doc.text(session.exitAt ? `${formatDateIST(session.exitAt)} ${formatTimeIST(session.exitAt)}` : dict.common.active, rightX + 38, y + 25);
 
   const durationMin = session.durationMinutes || Math.floor((Date.now() - new Date(session.entryAt).getTime()) / 60000);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text("Total Duration:", rightX + 4, y + 33);
+  doc.text(dict.pdf.totalDuration, rightX + 4, y + 33);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(37, 99, 235);
   doc.text(humanizeDuration(durationMin), rightX + 38, y + 33);
 
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text("Staff / Gate:", rightX + 4, y + 41);
+  doc.text(dict.pdf.staffGate, rightX + 4, y + 41);
   doc.setFont("helvetica", "medium");
   doc.setTextColor(15, 23, 42);
-  doc.text(session.exitOperatorName || session.entryOperatorName || "Gate Operator", rightX + 38, y + 41);
+  doc.text(session.exitOperatorName || session.entryOperatorName || dict.common.staff, rightX + 38, y + 41);
 
   y += cardHeight + 8;
 
@@ -393,12 +404,12 @@ export async function generatePdfBill(
   const amountWords = numberToWordsINR(amountRs);
   const formattedAmount = `Rs. ${amountRs.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const tableHead = [["Sr.", "Item Description", "Billing Unit", "Payment Mode", "Status", "Amount (INR)"]];
+  const tableHead = [[dict.pdf.srNo, dict.pdf.itemDescription, dict.pdf.billingUnit, dict.pdf.paymentMethodCol, dict.pdf.statusCol, dict.pdf.amountInr]];
   const tableBody = [
     [
       "1",
-      `Parking Charges (${vConfig?.label || session.vehicleType})`,
-      `${hoursBillable} Hour(s)`,
+      `${dict.pdf.parkingCharges} (${vConfig?.label || session.vehicleType})`,
+      `${hoursBillable} ${dict.pdf.hours}`,
       session.paymentMethod || "UPI / CASH",
       session.paymentStatus || "PAID",
       formattedAmount,
@@ -458,19 +469,19 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(30, 41, 59);
-  doc.text("TOTAL AMOUNT PAID", textLeftX, y + 12);
+  doc.text(dict.pdf.amountPaid, textLeftX, y + 12);
 
   doc.setFontSize(8.5);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text("Includes all applicable facility access fees & municipal taxes.", textLeftX, y + 19);
+  doc.text(dict.pdf.includesFees, textLeftX, y + 19);
   doc.text(`UPI VPA: ${UPI_CONFIG.vpa}`, textLeftX, y + 26);
 
   // Amount in Words
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(30, 41, 59);
-  doc.text("Amount in Words:", textLeftX, y + 36);
+  doc.text(dict.pdf.amountInWords, textLeftX, y + 36);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(37, 99, 235);
   doc.text(amountWords, textLeftX + 28, y + 36);
@@ -490,7 +501,7 @@ export async function generatePdfBill(
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(4, 120, 87); // Emerald 700 #047857
-  doc.text("PAYMENT VERIFIED", pageWidth - 40, y + 28.3, { align: "center" });
+  doc.text(dict.pdf.paymentVerified, pageWidth - 40, y + 28.3, { align: "center" });
 
   y += summaryHeight + 10;
 
@@ -500,14 +511,14 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
   doc.setTextColor(30, 41, 59);
-  doc.text("TERMS & CONDITIONS:", 14, y);
+  doc.text(dict.pdf.termsTitle, 14, y);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
-  doc.text("1. Vehicles are parked entirely at owner's risk. Management assumes no liability for loss or damage.", 14, y + 5);
-  doc.text("2. Please verify receipt details before leaving the gate counter.", 14, y + 9.5);
-  doc.text("3. Loss of parking receipt will incur standard verification check and additional fee.", 14, y + 14);
+  doc.text(dict.pdf.term1, 14, y + 5);
+  doc.text(dict.pdf.term2, 14, y + 9.5);
+  doc.text(dict.pdf.term3, 14, y + 14);
 
   // Signatory Box
   const sigX = pageWidth - 14 - sigBoxWidth;
@@ -523,10 +534,10 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(148, 163, 184);
-  doc.text("Computer Generated Official Stamp", sigX + sigBoxWidth / 2, y + 12, { align: "center" });
+  doc.text(dict.pdf.computerGenerated, sigX + sigBoxWidth / 2, y + 12, { align: "center" });
   doc.setFont("helvetica", "bold");
   doc.setTextColor(37, 99, 235);
-  doc.text("AUTHENTICATED", sigX + sigBoxWidth / 2, y + 18, { align: "center" });
+  doc.text(dict.pdf.authenticated, sigX + sigBoxWidth / 2, y + 18, { align: "center" });
 
   // ─── 7. FOOTER ──────────────────────────────────────────
   const footerY = pageHeight - 16;
@@ -538,13 +549,13 @@ export async function generatePdfBill(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
   doc.setTextColor(30, 41, 59);
-  doc.text(`Thank you for parking with ${brandName} Parking!`, pageWidth / 2, footerY, { align: "center" });
+  doc.text(`${dict.pdf.thankYouParking} ${brandName} ${dict.pdf.parking}!`, pageWidth / 2, footerY, { align: "center" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(148, 163, 184);
-  doc.text(`Generated on ${formatDateIST(new Date().toISOString())} ${formatTimeIST(new Date().toISOString())} | Valid Official Document`, 14, footerY + 5);
-  doc.text("Page 1 of 1 (Fit-to-Page)", pageWidth - 14, footerY + 5, { align: "right" });
+  doc.text(`${dict.pdf.generatedOn} ${formatDateIST(new Date().toISOString())} ${formatTimeIST(new Date().toISOString())} | ${dict.pdf.validDocument}`, 14, footerY + 5);
+  doc.text(dict.pdf.pageInfo, pageWidth - 14, footerY + 5, { align: "right" });
 
   const filename = `parking-bill-${session.vehicleNumber.toUpperCase()}-${session.id.slice(-6)}.pdf`;
   if (returnFileOnly === "base64") {

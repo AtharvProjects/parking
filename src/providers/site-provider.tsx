@@ -1,133 +1,103 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, type ReactNode } from "react";
-import { useAuth } from "@/providers/auth-provider";
-import { sitesService } from "@/services/sites.service";
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
+import { useAuth } from "./auth-provider";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { supabaseSitesService } from "@/services/supabase-sites.service";
 import type { Site } from "@/lib/database.types";
-import { useQueryClient } from "@tanstack/react-query";
 
-export interface SiteContextType {
-  currentSite: Site | null;
+interface SiteContextType {
   currentSiteId: string;
+  currentSite: Site | null;
   authorizedSites: Site[];
-  isLoadingSites: boolean;
-  switchSite: (siteId: string) => void;
-  canAccessSite: (siteId: string) => boolean;
-  refreshSites: () => Promise<void>;
   isAdmin: boolean;
+  isLoading: boolean;
+  switchSite: (siteId: string) => void;
+  refreshSites: () => void;
 }
 
 const SiteContext = createContext<SiteContextType>({
-  currentSite: null,
   currentSiteId: "",
+  currentSite: null,
   authorizedSites: [],
-  isLoadingSites: true,
-  switchSite: () => {},
-  canAccessSite: () => false,
-  refreshSites: async () => {},
   isAdmin: false,
+  isLoading: true,
+  switchSite: () => {},
+  refreshSites: () => {},
 });
+
+const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER'];
 
 export function SiteProvider({ children }: { children: ReactNode }) {
   const { employee, status } = useAuth();
   const queryClient = useQueryClient();
-  const [authorizedSites, setAuthorizedSites] = useState<Site[]>([]);
-  const [currentSiteId, setCurrentSiteId] = useState<string>("");
-  const [isLoadingSites, setIsLoadingSites] = useState<boolean>(true);
-
-  const isAdmin = useMemo(() => {
-    return employee?.role === "ADMIN" || employee?.role === "SUPER_ADMIN" || employee?.role === "MANAGER";
-  }, [employee?.role]);
-
-  const canAccessSite = useCallback((siteId: string) => {
-    if (!siteId) return false;
-    if (isAdmin) return true; // Admins have company-wide authorization
-    if (siteId === "ALL") return isAdmin;
-    return authorizedSites.some((s) => s.id === siteId);
-  }, [isAdmin, authorizedSites]);
-
-  const loadAuthorizedSites = useCallback(async () => {
-    if (!employee || status !== "authenticated") {
-      setAuthorizedSites([]);
-      setCurrentSiteId("");
-      setIsLoadingSites(false);
-      return;
+  const [selectedSiteId, setSelectedSiteId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("active_site_id") || "";
     }
+    return "";
+  });
 
-    try {
-      setIsLoadingSites(true);
-      const sites = await sitesService.getAuthorizedSites(employee);
-      setAuthorizedSites(sites);
+  const companyId = employee?.company_id || "";
+  const isAdmin = ADMIN_ROLES.includes(employee?.role || "");
 
-      // Determine active site ID from localStorage or fallback
-      const savedSiteId = typeof window !== "undefined" ? localStorage.getItem("active_site_id") : null;
-      let targetSiteId = "";
+  // Fetch all authorized sites from Supabase
+  const { data: sites = [], isLoading: isSitesLoading } = useQuery({
+    queryKey: ["authorized-sites", companyId],
+    queryFn: () => supabaseSitesService.getAuthorizedSites(companyId),
+    enabled: !!companyId && status === "authenticated",
+    staleTime: 60_000,
+  });
 
-      if (savedSiteId && (savedSiteId === "ALL" ? isAdmin : sites.some(s => s.id === savedSiteId))) {
-        targetSiteId = savedSiteId;
-      } else if (employee.site_id && sites.some(s => s.id === employee.site_id)) {
-        targetSiteId = employee.site_id;
-      } else if (sites.length > 0) {
-        targetSiteId = sites[0].id;
-      } else if (isAdmin) {
-        targetSiteId = "ALL";
-      }
-
-      setCurrentSiteId(targetSiteId);
-      if (targetSiteId && typeof window !== "undefined") {
-        localStorage.setItem("active_site_id", targetSiteId);
-      }
-    } catch (err) {
-      console.error("Failed to load authorized sites:", err);
-    } finally {
-      setIsLoadingSites(false);
+  // Declaratively compute active site ID
+  const currentSiteId = useMemo(() => {
+    if (selectedSiteId === "ALL" && isAdmin) {
+      return "ALL";
     }
-  }, [employee, status, isAdmin]);
+    if (selectedSiteId && sites.some(s => s.id === selectedSiteId)) {
+      return selectedSiteId;
+    }
+    if (employee?.site_id && sites.some(s => s.id === employee.site_id)) {
+      return employee.site_id;
+    }
+    return sites[0]?.id || "";
+  }, [selectedSiteId, isAdmin, sites, employee?.site_id]);
 
-  useEffect(() => {
-    loadAuthorizedSites();
-  }, [loadAuthorizedSites]);
+  // Derive current site object
+  const currentSite = useMemo(() => {
+    return currentSiteId && currentSiteId !== "ALL"
+      ? sites.find(s => s.id === currentSiteId) || null
+      : null;
+  }, [currentSiteId, sites]);
 
   const switchSite = useCallback((siteId: string) => {
-    if (siteId !== "ALL" && !canAccessSite(siteId)) {
-      console.warn(`Unauthorized attempt to switch to site ${siteId}`);
-      return;
-    }
-    if (siteId === "ALL" && !isAdmin) {
-      console.warn("Unauthorized attempt to select all sites");
-      return;
-    }
-
-    setCurrentSiteId(siteId);
+    setSelectedSiteId(siteId);
     if (typeof window !== "undefined") {
       localStorage.setItem("active_site_id", siteId);
     }
-
-    // Invalidate all site-dependent queries across the UI
+    // Invalidate all site-scoped queries immediately
+    queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
     queryClient.invalidateQueries({ queryKey: ["active-vehicles"] });
     queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
-    queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-    queryClient.invalidateQueries({ queryKey: ["active-rates"] });
     queryClient.invalidateQueries({ queryKey: ["reports"] });
     queryClient.invalidateQueries({ queryKey: ["search"] });
-  }, [canAccessSite, isAdmin, queryClient]);
+    queryClient.invalidateQueries({ queryKey: ["active-rates"] });
+  }, [queryClient]);
 
-  const currentSite = useMemo(() => {
-    if (!currentSiteId || currentSiteId === "ALL") return null;
-    return authorizedSites.find((s) => s.id === currentSiteId) || null;
-  }, [currentSiteId, authorizedSites]);
+  const refreshSites = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["authorized-sites"] });
+  }, [queryClient]);
 
   return (
     <SiteContext.Provider
       value={{
-        currentSite,
         currentSiteId,
-        authorizedSites,
-        isLoadingSites,
-        switchSite,
-        canAccessSite,
-        refreshSites: loadAuthorizedSites,
+        currentSite,
+        authorizedSites: sites,
         isAdmin,
+        isLoading: isSitesLoading,
+        switchSite,
+        refreshSites,
       }}
     >
       {children}

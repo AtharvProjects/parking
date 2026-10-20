@@ -11,6 +11,9 @@ import { Capacitor } from "@capacitor/core";
 import { useQuery } from "@tanstack/react-query";
 import { sitesService } from "@/services/sites.service";
 import { useSite } from "@/providers/site-provider";
+import { useBackHandler } from "@/providers/back-button-provider";
+import { openWhatsAppDirect } from "@/lib/whatsapp";
+import { useLanguage } from "@/providers/language-provider";
 
 export function BillReceiptModal({
   session,
@@ -19,7 +22,9 @@ export function BillReceiptModal({
   session: SessionWithRelations;
   onClose: () => void;
 }) {
+  useBackHandler(true, onClose, 20);
   const { currentSite } = useSite();
+  const { t, language } = useLanguage();
   const targetSiteId = session.site_id || currentSite?.id;
 
   const { data: site } = useQuery({
@@ -35,18 +40,21 @@ export function BillReceiptModal({
   const operatorName = session.exit_operator?.name || session.entry_operator?.name || "Gate Attendant";
 
   const handleWhatsAppShare = async () => {
-    if (!session.driver_number) {
-      alert("No driver phone number provided for this session.");
-      return;
+    let targetPhone = session.driver_number?.trim();
+    if (!targetPhone) {
+      const input = prompt(t("modals.enterDriverMobileWhatsApp"));
+      if (!input || !input.trim()) return;
+      targetPhone = input.trim();
     }
     
     try {
-      const filename = `parking-bill-${session.vehicle_number}-${session.id.slice(-6)}.pdf`;
+      const filename = `parking-bill-${session.vehicle_number.toUpperCase()}-${session.id.slice(-6)}.pdf`;
       const pdfData = {
         id: session.id,
         vehicleNumber: session.vehicle_number,
         vehicleType: session.vehicle_type,
-        driverNumber: session.driver_number,
+        driverNumber: targetPhone,
+        driverName: session.driver_name || null,
         notes: session.notes,
         entryAt: session.entry_at,
         exitAt: session.exit_at,
@@ -65,18 +73,15 @@ export function BillReceiptModal({
         ? `${Math.floor(session.duration_minutes/60)}h ${session.duration_minutes%60}m` 
         : "-";
       
-      const text = `*${brandName}* - Parking Receipt\n\nDate: ${receiptDate}\nVehicle: ${session.vehicle_number}\nReceipt: ${payment?.receipt_number || "N/A"}\nEntry: ${formatDateTimeIST(session.entry_at)}\n${session.exit_at ? `Exit: ${formatDateTimeIST(session.exit_at)}\n` : ""}Duration: ${durationStr}\n\n*Total Amount: ${amountStr}*\n\nThank you for visiting!`;
+      const driverLine = session.driver_name ? `\n${t("whatsapp.driverLabel")}: ${session.driver_name}` : "";
+      const text = `*${brandName}* - ${t("whatsapp.receiptTitle")}\n\n${t("whatsapp.dateLabel")}: ${receiptDate}\n${t("whatsapp.vehicleLabel")}: ${session.vehicle_number}${driverLine}\n${t("whatsapp.receiptLabel")}: ${payment?.receipt_number || t("common.na")}\n${t("whatsapp.entryLabel")}: ${formatDateTimeIST(session.entry_at)}\n${session.exit_at ? `${t("whatsapp.exitLabel")}: ${formatDateTimeIST(session.exit_at)}\n` : ""}${t("whatsapp.durationLabel")}: ${durationStr}\n\n*${t("whatsapp.totalAmountLabel")}: ${amountStr}*\n\n${t("whatsapp.thankYouVisiting")}`;
 
-      if (Capacitor.isNativePlatform()) {
-        const base64 = await generatePdfBill(pdfData, "base64", "thermal");
-        await sharePdfNative(base64 as string, filename, text);
-      } else {
-        await generatePdfBill(pdfData, false, "thermal"); 
-        window.open(`https://wa.me/91${session.driver_number}?text=${encodeURIComponent(text)}`, "_blank");
-      }
+      // Generate base64 PDF and send actual PDF document to WhatsApp
+      const base64 = await generatePdfBill(pdfData, "base64", "thermal", "exit", language);
+      await sharePdfNative(base64 as string, filename, text, targetPhone);
     } catch(err) {
-      console.error("Error generating or sharing bill:", err);
-      alert("Could not generate bill for sharing.");
+      console.error("Error sharing PDF on WhatsApp:", err);
+      alert("Could not generate PDF for WhatsApp sharing.");
     }
   };
 
@@ -88,6 +93,7 @@ export function BillReceiptModal({
         vehicleNumber: session.vehicle_number,
         vehicleType: session.vehicle_type,
         driverNumber: session.driver_number || "",
+        driverName: session.driver_name || null,
         notes: session.notes,
         entryAt: session.entry_at,
         exitAt: session.exit_at,
@@ -102,13 +108,14 @@ export function BillReceiptModal({
       };
 
       if (Capacitor.isNativePlatform()) {
-        const base64 = await generatePdfBill(pdfData, "base64", "thermal");
+        const base64 = await generatePdfBill(pdfData, "base64", "thermal", "exit", language);
         await downloadPdfNative(base64 as string, filename);
       } else {
-        await generatePdfBill(pdfData, false, "thermal");
+        await generatePdfBill(pdfData, false, "thermal", "exit", language);
       }
     } catch(err) {
       console.error("Error downloading bill:", err);
+      alert("Could not download bill PDF.");
     }
   };
 
@@ -147,9 +154,9 @@ export function BillReceiptModal({
         <div className="bg-primary p-5 text-center text-primary-foreground print:bg-white print:text-black print:border-b print:border-dashed">
           <h2 className="text-lg font-bold tracking-tight mb-0.5">{brandName}</h2>
           <p className="text-[11px] opacity-90 uppercase tracking-widest font-semibold print:opacity-100">
-            {session.exit_at ? "Official Exit Receipt" : "Parking Entry Slip"}
+            {session.exit_at ? t("pdf.exitReceipt") : t("pdf.entryTicket")}
           </p>
-          <p className="text-[10px] opacity-80 mt-1">Date: {receiptDate}</p>
+          <p className="text-[10px] opacity-80 mt-1">{t("common.date")}: {receiptDate}</p>
         </div>
 
         {/* Receipt Body - Thermal Paper Style */}
@@ -157,40 +164,52 @@ export function BillReceiptModal({
           
           <div className="flex justify-between items-end pb-3 border-b-2 border-dashed border-slate-200 print:pb-2">
             <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Vehicle No.</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">{t("pdf.vehicleNo")}</p>
               <p className="text-base font-mono font-black text-slate-900">{session.vehicle_number}</p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Receipt No.</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">{t("pdf.receiptNo")}</p>
               <p className="text-xs font-mono font-bold text-slate-900">{payment?.receipt_number || `SWP-${session.id.slice(-6).toUpperCase()}`}</p>
             </div>
           </div>
 
           <div className="space-y-2.5 text-slate-600 print:text-black">
             <div className="flex justify-between">
-              <span className="text-slate-500">Category</span>
+              <span className="text-slate-500">{t("pdf.category")}</span>
               <span className="font-bold text-slate-900">{session.vehicle_type}</span>
             </div>
+            {session.driver_name && (
+              <div className="flex justify-between">
+                <span className="text-slate-500">{t("gate.driver")}</span>
+                <span className="font-bold text-slate-900">{session.driver_name}</span>
+              </div>
+            )}
+            {session.driver_number && (
+              <div className="flex justify-between">
+                <span className="text-slate-500">{t("pdf.driverPhone")}</span>
+                <span className="font-mono font-semibold text-slate-900">{session.driver_number}</span>
+              </div>
+            )}
             <div className="flex justify-between">
-              <span className="text-slate-500">Entry</span>
+              <span className="text-slate-500">{t("search.entryTime")}</span>
               <span className="font-semibold text-slate-900">{formatDateTimeIST(session.entry_at)}</span>
             </div>
             {session.exit_at && (
               <div className="flex justify-between">
-                <span className="text-slate-500">Exit</span>
+                <span className="text-slate-500">{t("search.exitTime")}</span>
                 <span className="font-semibold text-slate-900">{formatDateTimeIST(session.exit_at)}</span>
               </div>
             )}
             <div className="flex justify-between">
-              <span className="text-slate-500">Duration</span>
-              <span className="font-bold text-primary">{session.duration_minutes ? `${Math.floor(session.duration_minutes/60)}h ${session.duration_minutes%60}m` : "Active"}</span>
+              <span className="text-slate-500">{t("activeVehicles.duration")}</span>
+              <span className="font-bold text-primary">{session.duration_minutes ? `${Math.floor(session.duration_minutes/60)}h ${session.duration_minutes%60}m` : t("common.active")}</span>
             </div>
           </div>
 
           {payment && (
             <div className="bg-slate-50 rounded-xl p-3.5 space-y-2 border border-slate-100 print:border-none print:p-0">
               <div className="flex justify-between text-xs">
-                <span className="text-slate-500">Payment Mode</span>
+                <span className="text-slate-500">{t("activeVehicles.paymentMethod")}</span>
                 <span className="font-bold text-slate-900">{payment.method || "CASH"}</span>
               </div>
               {payment.discount_amount > 0 && (
@@ -200,15 +219,15 @@ export function BillReceiptModal({
                 </div>
               )}
               <div className="flex justify-between items-center pt-2 border-t border-slate-200 mt-2">
-                <span className="font-bold text-slate-900">Total Paid</span>
+                <span className="font-bold text-slate-900">{t("activeVehicles.paymentReceived")}</span>
                 <span className="text-lg font-black text-primary print:text-black">{formatINR(payment.amount)}</span>
               </div>
             </div>
           )}
           
           <div className="pt-2 text-center text-[10px] text-slate-400 print:text-black space-y-1">
-            <p>Thank you for parking with us!</p>
-            <p className="font-medium text-slate-500">Operator: {operatorName}</p>
+            <p>{t("pdf.thankYou")}</p>
+            <p className="font-medium text-slate-500">{t("common.operator")}: {operatorName}</p>
           </div>
         </div>
 
@@ -217,31 +236,31 @@ export function BillReceiptModal({
           {session.driver_number && (
             <button 
               onClick={handleWhatsAppShare} 
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#25D366] text-white text-xs font-bold shadow-sm hover:opacity-90 transition-opacity"
+              className="pill w-full flex items-center justify-center gap-2 py-2.5 bg-[#25D366] text-white text-xs font-bold shadow-sm hover:opacity-95 transition-opacity"
             >
               <MessageCircle className="w-4 h-4" />
-              Share on WhatsApp
+              {t("modals.shareBillWhatsApp")}
             </button>
           )}
           <div className="grid grid-cols-2 gap-2">
             <button 
               onClick={handleDownload} 
-              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 transition-colors"
+              className="pill flex items-center justify-center gap-1.5 py-2.5 border border-slate-200 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 transition-colors"
             >
-              <Download className="w-3.5 h-3.5" /> Download
+              <Download className="w-3.5 h-3.5" /> {t("common.download")}
             </button>
             <button 
               onClick={() => window.print()} 
-              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-primary text-white text-xs font-bold shadow-sm hover:bg-primary/90 transition-colors"
+              className="vx-btn accent !py-2.5 text-xs font-bold shadow-sm"
             >
-              <Printer className="w-3.5 h-3.5" /> Print
+              <Printer className="w-3.5 h-3.5" /> {t("modals.printBill")}
             </button>
           </div>
           <button 
             onClick={onClose} 
             className="w-full py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
           >
-            Close Receipt
+            {t("common.close")} {t("whatsapp.receiptLabel")}
           </button>
         </div>
       </div>

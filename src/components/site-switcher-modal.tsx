@@ -3,6 +3,7 @@
 import React from "react";
 import { useSite } from "@/providers/site-provider";
 import { useAuth } from "@/providers/auth-provider";
+import { useLanguage } from "@/providers/language-provider";
 import { Building2, Check, X, MapPin, Car, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +16,7 @@ export function SiteSwitcherModal({
 }) {
   const { currentSiteId, authorizedSites, switchSite, isAdmin } = useSite();
   const { employee } = useAuth();
+  const { t } = useLanguage();
 
   if (!isOpen) return null;
 
@@ -32,23 +34,23 @@ export function SiteSwitcherModal({
       />
 
       {/* Modal Card */}
-      <div className="relative w-full max-w-md bg-card border border-border rounded-t-[32px] sm:rounded-3xl shadow-2xl flex flex-col max-h-[85vh] z-10 overflow-hidden animate-in slide-in-from-bottom-6 duration-300">
+      <div className="relative w-full max-w-md vx-card border border-[var(--line)] rounded-t-[32px] sm:rounded-3xl shadow-2xl flex flex-col max-h-[85vh] z-10 overflow-hidden animate-in slide-in-from-bottom-6 duration-300">
         
         {/* Header */}
-        <div className="p-5 pb-3 border-b border-border/80 flex items-center justify-between shrink-0">
+        <div className="p-5 pb-3 border-b border-[var(--line)] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center">
               <Building2 className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-foreground">Select Parking Site</h2>
-              <p className="text-xs text-muted-foreground">Switch active site context instantly</p>
+              <h2 className="text-base font-bold text-[var(--ink)]">{t("modals.selectParkingSite")}</h2>
+              <p className="text-xs text-[var(--ink3)]">{t("modals.switchSiteContext")}</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            className="w-8 h-8 rounded-full bg-[var(--soft)] flex items-center justify-center text-[var(--ink3)] hover:text-[var(--ink)] transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -65,31 +67,31 @@ export function SiteSwitcherModal({
               className={cn(
                 "w-full text-left p-4 rounded-2xl border transition-all flex items-center justify-between group",
                 currentSiteId === "ALL"
-                  ? "bg-primary/10 border-primary text-primary shadow-sm"
-                  : "bg-muted/40 border-border hover:bg-muted text-foreground"
+                  ? "bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] shadow-sm"
+                  : "bg-[var(--soft)] border-[var(--line)] hover:bg-[var(--soft2)] text-[var(--ink)]"
               )}
             >
               <div className="flex items-center gap-3.5">
                 <div className={cn(
-                  "w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0",
-                  currentSiteId === "ALL" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
+                  "w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-bold shrink-0",
+                  currentSiteId === "ALL" ? "bg-[var(--accent)] text-white" : "bg-[var(--card)] text-[var(--ink3)]"
                 )}>
                   <Shield className="w-5 h-5" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm">All Sites Combined</span>
-                    <span className="px-2 py-0.5 rounded-full bg-primary/15 text-primary text-[10px] font-bold">
+                    <span className="font-bold text-sm">{t("modals.allSitesCombined")}</span>
+                    <span className="pill px-2.5 py-0.5 bg-[var(--accent)] text-white text-[10px] font-bold">
                       Enterprise
                     </span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                  <p className="text-xs text-[var(--ink3)] mt-0.5">
                     Aggregated overview across all company parking sites
                   </p>
                 </div>
               </div>
               {currentSiteId === "ALL" && (
-                <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center shrink-0">
+                <div className="w-6 h-6 rounded-full bg-[var(--accent)] text-white flex items-center justify-center shrink-0">
                   <Check className="w-3.5 h-3.5" strokeWidth={3} />
                 </div>
               )}
@@ -109,44 +111,44 @@ export function SiteSwitcherModal({
                 className={cn(
                   "w-full text-left p-4 rounded-2xl border transition-all flex items-center justify-between group",
                   isSelected
-                    ? "bg-primary/10 border-primary text-primary shadow-sm"
-                    : "bg-muted/40 border-border hover:bg-muted text-foreground"
+                    ? "bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] shadow-sm"
+                    : "bg-[var(--soft)] border-[var(--line)] hover:bg-[var(--soft2)] text-[var(--ink)]"
                 )}
               >
                 <div className="flex items-center gap-3.5">
                   <div className={cn(
-                    "w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0",
-                    isSelected ? "bg-primary text-white" : "bg-muted text-muted-foreground"
+                    "w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-bold shrink-0",
+                    isSelected ? "bg-[var(--accent)] text-white" : "bg-[var(--card)] text-[var(--ink3)]"
                   )}>
                     <Building2 className="w-5 h-5" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">
+                      <span className="font-bold text-sm text-[var(--ink)] group-hover:text-[var(--accent)] transition-colors">
                         {site.name}
                       </span>
                       {isDefault && (
-                        <span className="px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px] font-bold border border-border">
+                        <span className="pill px-2 py-0.5 bg-[var(--card)] text-[var(--ink3)] text-[10px] font-bold border border-[var(--line)]">
                           Assigned
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                    <div className="flex items-center gap-3 text-xs text-[var(--ink3)] mt-0.5">
                       <span className="flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-muted-foreground" />
+                        <MapPin className="w-3 h-3 text-[var(--ink3)]" />
                         {site.city || "Location"}
                       </span>
                       <span>•</span>
                       <span className="flex items-center gap-1">
-                        <Car className="w-3 h-3 text-muted-foreground" />
-                        {site.total_slots} Slots
+                        <Car className="w-3 h-3 text-[var(--ink3)]" />
+                        {site.total_slots} {t("dashboard.slots")}
                       </span>
                     </div>
                   </div>
                 </div>
 
                 {isSelected && (
-                  <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center shrink-0">
+                  <div className="w-6 h-6 rounded-full bg-[var(--accent)] text-white flex items-center justify-center shrink-0">
                     <Check className="w-3.5 h-3.5" strokeWidth={3} />
                   </div>
                 )}
@@ -155,7 +157,7 @@ export function SiteSwitcherModal({
           })}
 
           {authorizedSites.length === 0 && !isAdmin && (
-            <div className="text-center py-8 text-xs text-muted-foreground font-medium">
+            <div className="text-center py-8 text-xs text-[var(--ink3)] font-medium">
               No authorized parking sites found for your account.
             </div>
           )}

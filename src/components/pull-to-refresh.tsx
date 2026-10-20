@@ -2,9 +2,10 @@
 
 import React, { useState, useRef } from "react";
 import { RefreshCw } from "lucide-react";
-import { SyncEngine } from "@/sync/engine";
+import { useQueryClient } from "@tanstack/react-query";
 
 export function PullToRefresh({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [startY, setStartY] = useState(0);
   const [currentY, setCurrentY] = useState(0);
   const [isPulling, setIsPulling] = useState(false);
@@ -13,8 +14,14 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
 
   const MAX_PULL = 70;
 
+  const getParentScrollTop = () => {
+    if (!scrollRef.current) return 0;
+    const scrollContainer = scrollRef.current.closest("main") || scrollRef.current.parentElement;
+    return scrollContainer ? scrollContainer.scrollTop : 0;
+  };
+
   const onTouchStart = (e: React.TouchEvent) => {
-    if (scrollRef.current && scrollRef.current.scrollTop <= 0) {
+    if (getParentScrollTop() <= 0) {
       setStartY(e.touches[0].clientY);
       setIsPulling(true);
     }
@@ -26,7 +33,7 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
     const y = e.touches[0].clientY;
     const dy = y - startY;
 
-    if (dy > 0 && scrollRef.current && scrollRef.current.scrollTop <= 0) {
+    if (dy > 0 && getParentScrollTop() <= 0) {
       setCurrentY(Math.min(dy * 0.45, MAX_PULL));
     }
   };
@@ -41,14 +48,12 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
       setCurrentY(44);
 
       try {
-        const companyId = localStorage.getItem("company_id");
-        if (companyId && navigator.onLine) {
-          await SyncEngine.pushSync();
-          await SyncEngine.pullSync(companyId);
-          window.dispatchEvent(new CustomEvent("sync_completed"));
-        }
+        // Invalidate all React Query caches to re-fetch from Supabase
+        await queryClient.invalidateQueries();
+        // Small delay to show the spinner
+        await new Promise(resolve => setTimeout(resolve, 500));
       } catch (err) {
-        console.warn("Pull-to-refresh sync notice:", err);
+        console.warn("Pull-to-refresh notice:", err);
       } finally {
         setIsRefreshing(false);
         setCurrentY(0);

@@ -1,15 +1,21 @@
-import { DashboardRepository } from '@/database/repositories/DashboardRepository';
+/**
+ * Dashboard Service — Thin adapter using Supabase-direct operations.
+ */
+import { supabaseDashboardService } from '@/services/supabase-dashboard.service';
+import type { DashboardStats } from '@/lib/database.types';
+
+function getCompanyId(): string {
+  return typeof window !== 'undefined'
+    ? localStorage.getItem('company_id') || '00000000-0000-0000-0000-000000000000'
+    : '00000000-0000-0000-0000-000000000000';
+}
 
 export const dashboardService = {
-  get companyId() {
-    return localStorage.getItem('company_id') || '';
+  async getStats(siteId?: string): Promise<DashboardStats> {
+    return supabaseDashboardService.getStats(getCompanyId(), siteId);
   },
 
-  async getStats(siteId: string) {
-    return DashboardRepository.getStats(this.companyId, siteId);
+  async getRevenueChart(siteId?: string, days = 7) {
+    return supabaseDashboardService.getRevenueChart(getCompanyId(), siteId, days);
   },
-
-  async getRevenueChart(siteId: string, days: number = 7) {
-    return DashboardRepository.getRevenueChart(this.companyId, siteId, days);
-  }
 };

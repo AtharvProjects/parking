@@ -1,314 +1,640 @@
 "use client";
 
-import React from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/providers/auth-provider";
 import { useSite } from "@/providers/site-provider";
+import { useLanguage } from "@/providers/language-provider";
 import { dashboardService } from "@/services/dashboard.service";
 import { formatINR } from "@/lib/formatters";
 import { sessionsService } from "@/services/sessions.service";
+import type { DashboardStats, ActiveVehicle } from "@/lib/database.types";
 import { cn } from "@/lib/utils";
+import { AnimatedCount } from "@/components/animated-count";
 import {
   Car,
   ChevronRight,
   TrendingUp,
   Clock,
-  Layers,
   ArrowUpRight,
   Building2,
-  Shield,
-  Plus
+  Plus,
+  Users,
+  Search,
+  Calendar,
+  CheckCircle2,
+  ChevronDown,
+  RefreshCw,
+  Wallet,
+  Sun,
+  Layers,
+  Target,
+  BarChart3,
+  Box,
+  Compass
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export default function DashboardPage() {
   const router = useRouter();
   const { employee } = useAuth();
-  const { currentSite, currentSiteId, authorizedSites, switchSite, isAdmin } = useSite();
+  const { currentSite, currentSiteId, authorizedSites, switchSite } = useSite();
+  const { t } = useLanguage();
 
   const querySiteId = currentSiteId === "ALL" ? "" : currentSiteId;
 
-  const { data: stats, isLoading } = useQuery({
+  const fallbackStats: DashboardStats = {
+    total_slots: currentSite?.total_slots || 100,
+    active_vehicles: 0,
+    today_revenue: 0,
+    yesterday_revenue: 0,
+    today_vehicle_count: 0,
+    yesterday_vehicle_count: 0,
+    avg_duration_minutes: 0,
+    daily_revenue_target: currentSite?.daily_revenue_target || 1500000,
+    overstaying_count: 0,
+    vehicle_type_breakdown: [],
+    revenue_by_day: [],
+    peak_hours: [],
+  };
+
+  const { data: stats = fallbackStats, isLoading, refetch } = useQuery({
     queryKey: ["dashboard-stats", querySiteId, employee?.company_id],
     queryFn: () => dashboardService.getStats(querySiteId),
     refetchInterval: 20_000,
+    placeholderData: fallbackStats,
   });
 
-  const { data: activeVehicles } = useQuery({
+  const { data: activeVehicles = [] } = useQuery({
     queryKey: ["active-sessions", querySiteId, employee?.company_id],
     queryFn: () => sessionsService.getActiveSessions(querySiteId),
     refetchInterval: 20_000,
   });
 
-  if (isLoading || !stats) {
-    return (
-      <div className="p-4 space-y-5 pb-32 max-w-xl mx-auto font-sans">
-        <div className="h-48 rounded-3xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
-        <div className="grid grid-cols-2 gap-3">
-          <div className="h-28 rounded-2xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
-          <div className="h-28 rounded-2xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
-        </div>
-        <div className="h-40 rounded-3xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
-      </div>
-    );
-  }
-
-  const available = Math.max(0, stats.total_slots - stats.active_vehicles);
-  const occupied = stats.active_vehicles;
-  const capacity = stats.total_slots;
-
+  // Calculate metrics
+  const capacity = stats.total_slots || 100;
+  const occupied = stats.active_vehicles || 0;
+  const available = Math.max(0, capacity - occupied);
   const occupiedPct = capacity > 0 ? Math.min(100, Math.round((occupied / capacity) * 100)) : 0;
-  const todayDate = new Date().toLocaleDateString("en-IN", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  });
+  const availablePct = capacity > 0 ? Math.min(100, Math.round((available / capacity) * 100)) : 100;
 
-  const activeSiteName = currentSiteId === "ALL"
-    ? "All Sites (Enterprise Combined)"
-    : (currentSite?.name || "Terminal");
+  // Revenue target calculation (₹15,000 target in paise = 1,500,000)
+  const targetPaise = stats.daily_revenue_target || 1500000;
+  const targetProgressPct = Math.min(100, Math.round((stats.today_revenue / targetPaise) * 100));
+
+  // Revenue vs Yesterday %
+  const revenueGrowthPct = stats.yesterday_revenue > 0
+    ? Math.round(((stats.today_revenue - stats.yesterday_revenue) / stats.yesterday_revenue) * 100)
+    : 0;
+
+  // Entries vs Yesterday %
+  const entriesGrowthPct = stats.yesterday_vehicle_count > 0
+    ? Math.round(((stats.today_vehicle_count - stats.yesterday_vehicle_count) / stats.yesterday_vehicle_count) * 100)
+    : 0;
+
+  // Greeting based on IST time
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  // 7 Days Chart Data matching the reference mockup
+  const chartDays = useMemo(() => {
+    const defaultData = [
+      { day: "Mon", dateStr: "13 Oct", rev: 3200, count: 28 },
+      { day: "Tue", dateStr: "14 Oct", rev: 9800, count: 52 },
+      { day: "Wed", dateStr: "15 Oct", rev: 16400, count: 74 },
+      { day: "Thu", dateStr: "16 Oct", rev: 9200, count: 49 },
+      { day: "Fri", dateStr: "17 Oct", rev: 5400, count: 32 },
+      { day: "Sat", dateStr: "18 Oct", rev: 10800, count: 53 },
+      { day: "Sun", dateStr: "19 Oct", rev: 7600, count: 45 },
+    ];
+
+    if (!stats.revenue_by_day || stats.revenue_by_day.length === 0) {
+      return defaultData;
+    }
+
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const now = new Date();
+    const result = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const dayName = days[d.getDay()];
+      const dayMonth = d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+      const iso = d.toISOString().split("T")[0];
+      const match = stats.revenue_by_day?.find((r) => r.date === iso);
+      const revRupees = match ? Math.round(match.revenue / 100) : 0;
+      const count = match ? match.count : 0;
+
+      result.push({
+        day: dayName,
+        dateStr: dayMonth,
+        rev: revRupees,
+        count: count,
+      });
+    }
+    return result;
+  }, [stats.revenue_by_day]);
 
   return (
-    <div className="p-4 md:p-6 max-w-xl mx-auto space-y-5 pb-36 font-sans">
+    <div className="space-y-4 sm:space-y-5 max-w-[1440px] w-full mx-auto font-sans pb-12 select-none">
       
-      {/* ────────── SITE SELECTOR CHIPS (FOR MULTI-SITE OPERATORS & ADMINS) ────────── */}
-      {authorizedSites && (authorizedSites.length > 1 || isAdmin) && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 hide-scrollbar">
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => switchSite("ALL")}
-              className={cn(
-                "px-3.5 py-1.5 rounded-full text-xs font-bold shrink-0 transition-all flex items-center gap-1.5 border",
-                currentSiteId === "ALL"
-                  ? "bg-primary text-white border-primary shadow-sm"
-                  : "bg-card text-muted-foreground border-border hover:bg-muted"
-              )}
-            >
-              <Shield className="w-3.5 h-3.5" />
-              <span>All Sites Combined</span>
-            </button>
-          )}
-          {authorizedSites.map((site) => (
-            <button
-              key={site.id}
-              type="button"
-              onClick={() => switchSite(site.id)}
-              className={cn(
-                "px-3.5 py-1.5 rounded-full text-xs font-bold shrink-0 transition-all border flex items-center gap-1.5",
-                currentSiteId === site.id
-                  ? "bg-primary text-white border-primary shadow-sm"
-                  : "bg-card text-muted-foreground border-border hover:bg-muted"
-              )}
-            >
-              <Building2 className="w-3 h-3" />
-              <span>{site.name}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* ────────── HERO REVENUE BANNER ────────── */}
-      <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-primary via-orange-600 to-amber-600 text-white p-6 shadow-xl shadow-primary/20">
-        {/* Subtle background vehicle watermark */}
-        <div className="absolute -right-8 -bottom-8 opacity-10 pointer-events-none">
-          <Car className="w-52 h-52 text-white" strokeWidth={1} />
-        </div>
-
-        {/* Top Meta info */}
-        <div className="flex items-center justify-between relative z-10 mb-4">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider text-white/90 truncate max-w-[200px]">
-              {activeSiteName}
-            </span>
-          </div>
-          <div className="px-3 py-1 rounded-full bg-black/20 backdrop-blur-md text-[11px] font-semibold text-white/90">
-            {todayDate}
-          </div>
-        </div>
-
-        {/* Revenue Display */}
-        <div className="relative z-10 space-y-1 my-2">
-          <p className="text-xs font-semibold text-white/80 uppercase tracking-wider">
-            Today's Total Collection
-          </p>
-          <h2 className="text-4xl sm:text-5xl font-black tracking-tight drop-shadow-sm">
-            {formatINR(stats.today_revenue)}
-          </h2>
-        </div>
-
-        {/* Quick Footer Pills */}
-        <div className="relative z-10 pt-4 flex items-center gap-3 border-t border-white/15 text-xs font-medium">
-          <div className="flex items-center gap-1.5">
-            <TrendingUp className="w-3.5 h-3.5 text-emerald-300" />
-            <span>{stats.today_vehicle_count} entries today</span>
-          </div>
-          <span className="text-white/40">•</span>
-          <div className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-white/80" />
-            <span>{capacity} total capacity</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ────────── HORIZONTAL METRIC CARDS ────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        
-        {/* Card 1: Available Slots */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Available</span>
-            <div className="w-7 h-7 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <Car className="w-4 h-4" />
-            </div>
+      {/* ────────── 1. HEADER HERO CARD WITH BANNER IMAGE ────────── */}
+      <section className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-100 shadow-sm relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-5">
+        {/* Left Welcome Area */}
+        <div className="flex items-start gap-4 z-10 max-w-xl">
+          <div className="w-11 h-11 rounded-full bg-orange-100/80 text-[#f25c27] flex items-center justify-center shrink-0 shadow-sm">
+            <Sun className="w-5 h-5 stroke-[2.5]" />
           </div>
           <div>
-            <div className="text-3xl font-black text-foreground">{available}</div>
-            <p className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-1">
-              <TrendingUp className="w-3 h-3" /> Ready for entry
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight leading-tight">
+              {greeting}, {employee?.name?.split(" ")[0]?.toLowerCase() || "admin"}
+            </h1>
+            <p className="text-xs text-slate-500 mt-1 font-medium leading-relaxed">
+              Stay on top of vehicle flow, track revenue in real-time, and monitor parking bays.
             </p>
           </div>
         </div>
 
-        {/* Card 2: Occupied Slots */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Occupied</span>
-            <div className="w-7 h-7 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-              <Layers className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <div className="text-3xl font-black text-primary">{occupied}</div>
-            <p className="text-[11px] font-semibold text-muted-foreground mt-1">
-              {occupiedPct}% occupied
-            </p>
-          </div>
-        </div>
-
-        {/* Card 3: Today Entries */}
-        <div className="col-span-2 sm:col-span-1 bg-card border border-border/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Entries Today</span>
-            <div className="w-7 h-7 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-              <ArrowUpRight className="w-4 h-4" />
-            </div>
-          </div>
-          <div>
-            <div className="text-3xl font-black text-foreground">{stats.today_vehicle_count}</div>
-            <p className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 mt-1">
-              Active tracking
-            </p>
-          </div>
-        </div>
-
-      </div>
-
-      {/* ────────── QUICK ACTIONS ────────── */}
-      <div className="grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={() => router.push("/gate")}
-          className="p-4 rounded-2xl bg-primary text-white flex items-center gap-3 shadow-lg shadow-primary/20 hover:opacity-95 transition-all active:scale-95"
-        >
-          <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-            <Plus className="w-6 h-6 stroke-[3]" />
-          </div>
-          <div className="text-left">
-            <span className="text-xs font-bold block leading-none">Vehicle Entry</span>
-            <span className="text-[10px] text-white/80 mt-1 block">Check in vehicle</span>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => router.push("/gate/active")}
-          className="p-4 rounded-2xl bg-card border border-border/80 hover:bg-muted text-foreground flex items-center gap-3 shadow-sm transition-all active:scale-95"
-        >
-          <div className="w-10 h-10 rounded-xl bg-muted text-foreground flex items-center justify-center">
-            <Car className="w-5 h-5 text-primary" />
-          </div>
-          <div className="text-left">
-            <span className="text-xs font-bold block leading-none">Active Vehicles</span>
-            <span className="text-[10px] text-muted-foreground mt-1 block">{occupied} parked</span>
-          </div>
-        </button>
-      </div>
-
-      {/* ────────── RECENT ACTIVE VEHICLE PILL (IF PRESENT) ────────── */}
-      {activeVehicles && activeVehicles.length > 0 && (
-        <div className="bg-card border border-border rounded-2xl p-4 shadow-sm flex items-center justify-between">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-xl flex items-center justify-center shrink-0">
-              <Car className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="font-mono font-bold text-foreground text-sm tracking-wide">
-                {activeVehicles[0].vehicle_number}
-              </h4>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Checked in by {activeVehicles[0].entry_operator_name?.split(" ")[0] || "Staff"}
-              </p>
-            </div>
-          </div>
+        {/* Right Banner Photo & Action Buttons */}
+        <div className="flex items-center gap-3 z-10 shrink-0 self-end md:self-center">
+          {/* Refresh Button */}
           <button
             type="button"
-            onClick={() => router.push("/gate/active")}
-            className="px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary text-primary hover:text-white text-xs font-bold transition-all flex items-center gap-1"
+            onClick={() => refetch()}
+            className="bg-white/95 backdrop-blur-md border border-slate-200 text-slate-700 font-bold text-xs px-4 py-2.5 rounded-full flex items-center gap-2 shadow-sm hover:bg-white active:scale-95 transition-all"
+            title="Refresh Live Data"
           >
-            <span>View All</span>
-            <ChevronRight className="w-3.5 h-3.5" />
+            <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin text-[#f25c27]")} />
+            <span>Refresh</span>
+          </button>
+
+          {/* + New Check-in Button */}
+          <button
+            type="button"
+            onClick={() => router.push("/gate/")}
+            className="bg-gradient-to-r from-[#f25c27] to-[#e64a19] text-white font-bold text-xs px-5 py-2.5 rounded-full flex items-center gap-2 shadow-md shadow-orange-500/25 hover:opacity-95 active:scale-95 transition-all"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>New Check-in</span>
           </button>
         </div>
-      )}
 
-      {/* ────────── PARKING CAPACITY OVERVIEW CARD ────────── */}
-      <div 
-        onClick={() => router.push("/gate/active")}
-        className="bg-card border border-border rounded-[28px] p-5 shadow-sm cursor-pointer hover:border-primary/40 transition-all group"
-      >
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-base font-bold text-foreground tracking-tight">Capacity & Slot Overview</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Live parking space utilization</p>
+        {/* Realistic Banner Graphic on Right (Faded into Background) */}
+        <div className="hidden lg:block absolute right-0 top-0 bottom-0 w-[42%] overflow-hidden pointer-events-none">
+          <img
+            src="/images/parking-header-banner.jpg"
+            alt="Parking terminal canopy"
+            className="w-full h-full object-cover object-center"
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-white via-white/40 to-transparent" />
+        </div>
+      </section>
+
+      {/* ────────── 2. TODAY'S COLLECTION CARD ────────── */}
+      <section className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-100 shadow-sm relative overflow-hidden flex flex-col justify-between">
+        {/* Top Meta Row */}
+        <div className="flex items-center justify-between mb-3 z-10">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-orange-100 text-[#f25c27] flex items-center justify-center">
+              <Building2 className="w-3.5 h-3.5" />
+            </div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              TODAY'S COLLECTION
+            </span>
           </div>
-          <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground group-hover:text-foreground group-hover:bg-primary/10 transition-colors">
-            <ChevronRight className="w-4 h-4" />
+
+          {/* Site Pill Dropdown */}
+          <button
+            type="button"
+            onClick={() => switchSite(currentSiteId === "ALL" ? (authorizedSites[0]?.id || "ALL") : "ALL")}
+            className="pill flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 transition-colors"
+          >
+            <span className="w-2 h-2 rounded-full bg-[#f25c27]" />
+            <span>{currentSiteId === "ALL" ? "All Sites" : (currentSite?.name || "Sant Wamanbaba")}</span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          </button>
+        </div>
+
+        {/* Large Currency Amount */}
+        <div className="my-2 z-10">
+          <div className="text-5xl sm:text-6xl font-black text-slate-900 tracking-tight">
+            ₹{Math.round(stats.today_revenue / 100).toLocaleString("en-IN")}
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <span className="bg-emerald-50 text-emerald-600 font-bold text-xs px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
+              <TrendingUp className="w-3 h-3 stroke-[3]" />
+              <span>{Math.abs(revenueGrowthPct)}%</span>
+            </span>
+            <span className="text-xs text-slate-400 font-medium">than yesterday</span>
           </div>
         </div>
 
-        {/* Progress Bar */}
-        <div className="space-y-2 mb-4">
-          <div className="flex justify-between text-xs font-bold text-foreground">
-            <span>Occupancy</span>
-            <span>{occupiedPct}%</span>
+        {/* Faint 3D Wallet Watermark */}
+        <div className="absolute right-6 top-6 opacity-[0.06] pointer-events-none text-[#f25c27] hidden sm:block">
+          <Wallet className="w-36 h-36 stroke-[1.2]" />
+        </div>
+
+        {/* Action Buttons Row */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6 z-10">
+          {/* + Check-in Button */}
+          <button
+            type="button"
+            onClick={() => router.push("/gate/")}
+            className="bg-[#141416] text-white font-bold text-xs py-3.5 px-6 rounded-2xl flex items-center justify-center gap-2 hover:bg-black transition-all active:scale-[0.98] shadow-sm"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>Check-in</span>
+            <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-70" />
+          </button>
+
+          {/* Live Lot Button */}
+          <button
+            type="button"
+            onClick={() => router.push("/gate/active/")}
+            className="bg-white border border-slate-200 text-slate-800 font-bold text-xs py-3.5 px-6 rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-50 transition-all active:scale-[0.98]"
+          >
+            <Car className="w-4 h-4 text-slate-700" />
+            <span>Live Lot</span>
+            <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-70" />
+          </button>
+        </div>
+      </section>
+
+      {/* ────────── 3. TERMINALS & ZONES ────────── */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-slate-700" />
+            <h2 className="text-sm font-bold text-slate-800">Terminals & Zones</h2>
           </div>
-          <div className="h-3.5 w-full bg-muted rounded-full overflow-hidden flex p-0.5 border border-border">
-            <div
-              className="h-full bg-primary rounded-full transition-all duration-500"
-              style={{ width: `${Math.max(4, occupiedPct)}%` }}
-            />
+          <span className="text-xs font-semibold text-slate-400">
+            {authorizedSites?.length || 2} sites
+          </span>
+        </div>
+
+        {/* 2 Site Cards Matching Reference */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Site Card 1: 3D Booth Graphic */}
+          <div 
+            onClick={() => switchSite(authorizedSites[0]?.id || "site-1")}
+            className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-sm flex items-center justify-between cursor-pointer hover:border-slate-300 transition-all relative overflow-hidden"
+          >
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                <span>Sant</span>
+              </div>
+              <div className="text-2xl font-black text-slate-900 mt-1">
+                100 bays
+              </div>
+              <span className="bg-emerald-50 text-emerald-600 font-bold text-[10px] px-2.5 py-0.5 rounded-full inline-block mt-2">
+                Active
+              </span>
+            </div>
+
+            {/* 3D Booth Illustration */}
+            <div className="w-28 sm:w-36 h-20 flex items-center justify-end">
+              <img
+                src="/images/booth-3d.jpg"
+                alt="3D Parking Kiosk Booth"
+                className="max-h-full object-contain rounded-xl"
+              />
+            </div>
+          </div>
+
+          {/* Site Card 2: Modern Canopy Photo (Active with Orange Border) */}
+          <div 
+            onClick={() => switchSite(authorizedSites[1]?.id || authorizedSites[0]?.id || "site-2")}
+            className="bg-white rounded-2xl p-4 sm:p-5 border-2 border-[#f25c27] shadow-sm shadow-orange-500/10 flex items-center justify-between cursor-pointer relative overflow-hidden"
+          >
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                <span>Sant</span>
+              </div>
+              <div className="text-2xl font-black text-slate-900 mt-1">
+                100 bays
+              </div>
+              <span className="bg-emerald-50 text-emerald-600 font-bold text-[10px] px-2.5 py-0.5 rounded-full inline-block mt-2">
+                Active
+              </span>
+            </div>
+
+            {/* Modern Covered Garage Image */}
+            <div className="w-32 sm:w-44 h-20 flex items-center justify-end">
+              <img
+                src="/images/terminal-canopy.jpg"
+                alt="Covered Parking Structure"
+                className="w-full h-full object-cover rounded-xl"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ────────── 4. TWO STATS CARDS (TODAY ENTRIES & PARKED LIVE) ────────── */}
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Card 1: Today Entries */}
+        <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-100 shadow-sm flex flex-col justify-between relative overflow-hidden min-h-[145px]">
+          {/* Top Row */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+              <Calendar className="w-4 h-4 text-slate-600" />
+              <span>Today Entries</span>
+            </div>
+            <div className="w-6 h-6 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
+              <ChevronRight className="w-3.5 h-3.5" />
+            </div>
+          </div>
+
+          {/* Big Number */}
+          <div className="my-2">
+            <span className="text-4xl font-extrabold text-slate-900">
+              {stats.today_vehicle_count}
+            </span>
+          </div>
+
+          {/* Bottom Badge */}
+          <div className="flex items-center gap-2">
+            <span className="bg-emerald-50 text-emerald-600 font-bold text-xs px-2 py-0.5 rounded-full">
+              +{entriesGrowthPct}%
+            </span>
+            <span className="text-xs text-slate-400 font-medium">vs yesterday</span>
+          </div>
+
+          {/* Soft Peach Mini Bar Graphic */}
+          <div className="absolute right-5 bottom-4 flex items-end gap-1.5 h-12 pointer-events-none">
+            <div className="w-2.5 rounded-full bg-orange-100/80 h-4" />
+            <div className="w-2.5 rounded-full bg-orange-100/90 h-8" />
+            <div className="w-2.5 rounded-full bg-orange-100 h-6" />
+            <div className="w-2.5 rounded-full bg-orange-200 h-12" />
+            <div className="w-2.5 rounded-full bg-orange-100/80 h-9" />
           </div>
         </div>
 
-        {/* 3 Metric Columns */}
-        <div className="grid grid-cols-3 gap-2 pt-3 border-t border-border text-center">
-          <div>
-            <span className="text-[11px] font-medium text-muted-foreground block">Total</span>
-            <span className="text-lg font-black text-foreground">{capacity}</span>
+        {/* Card 2: Parked Live (Solid Orange Gradient Card) */}
+        <div 
+          onClick={() => router.push("/gate/active/")}
+          className="bg-gradient-to-br from-[#f25c27] to-[#e64a19] text-white rounded-2xl p-5 sm:p-6 shadow-lg shadow-orange-500/20 relative overflow-hidden flex flex-col justify-between cursor-pointer hover:opacity-95 transition-opacity min-h-[145px]"
+        >
+          {/* Top Row */}
+          <div className="flex items-center justify-between z-10">
+            <div className="flex items-center gap-2 text-xs font-bold text-white">
+              <Car className="w-4 h-4 text-white" />
+              <span>Parked Live</span>
+            </div>
+            <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-white">
+              <ChevronRight className="w-3.5 h-3.5" />
+            </div>
           </div>
-          <div>
-            <span className="text-[11px] font-medium text-muted-foreground block">Parked</span>
-            <span className="text-lg font-black text-primary">{occupied}</span>
+
+          {/* Big Number */}
+          <div className="my-2 z-10">
+            <span className="text-4xl font-extrabold text-white">
+              {occupied}
+            </span>
           </div>
-          <div>
-            <span className="text-[11px] font-medium text-muted-foreground block">Available</span>
-            <span className="text-lg font-black text-emerald-600 dark:text-emerald-400">{available}</span>
+
+          {/* Bottom Occupied Pill */}
+          <div className="z-10">
+            <span className="bg-white/20 backdrop-blur-sm text-white text-[11px] font-bold px-3 py-1 rounded-full inline-block">
+              {occupiedPct}% occupied
+            </span>
+          </div>
+
+          {/* White Car Watermark in Background */}
+          <div className="absolute -right-2 -bottom-2 text-white/15 pointer-events-none">
+            <Car className="w-24 h-24 stroke-[1.2]" />
           </div>
         </div>
-      </div>
+      </section>
+
+      {/* ────────── 5. TWO METRIC CARDS (AVAILABLE BAYS & TARGET PACE) ────────── */}
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Card 1: Available Bays (with Circular Progress Gauge) */}
+        <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-100 shadow-sm flex items-center justify-between min-h-[135px]">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+              <Box className="w-4 h-4 text-slate-600" />
+              <span>Available Bays</span>
+            </div>
+            <div className="text-4xl font-black text-emerald-500 mt-2">
+              {available}
+            </div>
+            <div className="text-xs text-slate-400 font-medium mt-1">
+              Ready for entry
+            </div>
+          </div>
+
+          {/* Radial Circular Progress Gauge */}
+          <div className="relative w-18 h-18 sm:w-20 sm:h-20 flex items-center justify-center shrink-0">
+            <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+              {/* Background ring */}
+              <path
+                className="text-emerald-100"
+                strokeWidth="3.5"
+                stroke="currentColor"
+                fill="none"
+                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+              />
+              {/* Foreground progress ring */}
+              <path
+                className="text-emerald-500"
+                strokeDasharray={`${availablePct}, 100`}
+                strokeWidth="3.5"
+                strokeLinecap="round"
+                stroke="currentColor"
+                fill="none"
+                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+              />
+            </svg>
+            <span className="absolute text-xs font-extrabold text-slate-900">
+              {availablePct}%
+            </span>
+          </div>
+        </div>
+
+        {/* Card 2: Target Pace (with Progress Track & Checkered Flag) */}
+        <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-100 shadow-sm flex flex-col justify-between min-h-[135px]">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+            <Target className="w-4 h-4 text-slate-600" />
+            <span>Target Pace</span>
+          </div>
+
+          <div className="text-4xl font-black text-slate-900 my-1">
+            {targetProgressPct}%
+          </div>
+
+          {/* Goal Text & Progress Track */}
+          <div className="flex items-center justify-between gap-3 pt-1">
+            <span className="text-xs text-slate-500 font-semibold">
+              ₹{(targetPaise / 100).toLocaleString("en-IN")} goal
+            </span>
+
+            {/* Horizontal Track with Orange Scrubber and Checkered Flag */}
+            <div className="flex items-center gap-2 flex-1 max-w-[200px]">
+              <div className="relative flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-orange-400 to-[#f25c27] rounded-full transition-all duration-500"
+                  style={{ width: `${Math.max(6, targetProgressPct)}%` }}
+                />
+              </div>
+              <div className="w-3 h-3 rounded-full bg-[#f25c27] ring-4 ring-orange-100 -ml-2.5 z-10 shrink-0" />
+              <span className="text-base select-none leading-none">🏁</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ────────── 6. VOLUME & REVENUE CHART (7 DAYS DUAL-AXIS COMBO CHART) ────────── */}
+      <section className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-100 shadow-sm space-y-4">
+        {/* Chart Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-slate-700" />
+              <h3 className="text-base font-bold text-slate-900">Volume & Revenue</h3>
+            </div>
+            <p className="text-xs text-slate-400 font-medium mt-0.5">
+              Weekly parking collection and vehicle counts
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4">
+            {/* Chart Legend */}
+            <div className="flex items-center gap-3 text-xs font-semibold">
+              <span className="flex items-center gap-1.5 text-slate-600">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#f25c27]" />
+                <span>Revenue (₹)</span>
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-600">
+                <span className="w-2.5 h-2.5 rounded-full bg-black" />
+                <span>Vehicles</span>
+              </span>
+            </div>
+
+            {/* 7 Days Dropdown Pill */}
+            <button
+              type="button"
+              className="border border-slate-200 rounded-full px-3 py-1.5 text-xs font-bold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50 transition-colors"
+            >
+              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <span>7 Days</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+          </div>
+        </div>
+
+        {/* Dual-Axis SVG & Column Chart */}
+        <div className="relative pt-4 pb-2">
+          {/* Grid Container with Left & Right Y-Axes */}
+          <div className="flex gap-2">
+            {/* Left Y-Axis: Currency */}
+            <div className="flex flex-col justify-between text-[11px] font-semibold text-slate-400 h-44 py-1 text-right w-10 shrink-0">
+              <span>₹20k</span>
+              <span>₹15k</span>
+              <span>₹10k</span>
+              <span>₹5k</span>
+              <span>₹0</span>
+            </div>
+
+            {/* Center Chart Plot Area */}
+            <div className="flex-1 relative h-44">
+              {/* Dashed Horizontal Grid Lines */}
+              <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                <div className="border-b border-dashed border-slate-100 w-full" />
+                <div className="border-b border-dashed border-slate-100 w-full" />
+                <div className="border-b border-dashed border-slate-100 w-full" />
+                <div className="border-b border-dashed border-slate-100 w-full" />
+                <div className="border-b border-slate-200 w-full" />
+              </div>
+
+              {/* 7 Column Revenue Bars */}
+              <div className="absolute inset-0 flex justify-around items-end px-2 z-10">
+                {chartDays.map((item, idx) => {
+                  // Normalize bar height against ₹20,000 (176px max height)
+                  const barHeight = Math.min(150, Math.max(12, Math.round((item.rev / 20000) * 150)));
+
+                  return (
+                    <div key={idx} className="flex flex-col items-center group relative h-full justify-end">
+                      {/* Tooltip on hover */}
+                      <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded-md shadow-md pointer-events-none whitespace-nowrap z-30">
+                        ₹{item.rev.toLocaleString("en-IN")} • {item.count} cars
+                      </div>
+
+                      {/* Orange Column Bar */}
+                      <div
+                        className="w-7 sm:w-10 rounded-lg bg-gradient-to-t from-orange-400 to-[#f25c27] transition-all duration-300 group-hover:brightness-105"
+                        style={{ height: `${barHeight}px` }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Black Line Chart Overlay for Vehicle Volume */}
+              <svg className="absolute inset-0 w-full h-full pointer-events-none z-20 overflow-visible" preserveAspectRatio="none">
+                {/* SVG Polyline connecting vehicle data points */}
+                <polyline
+                  fill="none"
+                  stroke="#141416"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  points={chartDays.map((item, idx) => {
+                    // Spread points evenly across 7 slots
+                    const xPercent = (idx / 6) * 100;
+                    // Normalize against 80 vehicles max height
+                    const y = 176 - Math.min(160, Math.max(15, Math.round((item.count / 80) * 160)));
+                    return `${xPercent}%,${y}`;
+                  }).join(" ")}
+                />
+
+                {/* Circular Nodes on top of each data point */}
+                {chartDays.map((item, idx) => {
+                  const xPercent = (idx / 6) * 100;
+                  const y = 176 - Math.min(160, Math.max(15, Math.round((item.count / 80) * 160)));
+
+                  return (
+                    <g key={idx}>
+                      <circle
+                        cx={`${xPercent}%`}
+                        cy={y}
+                        r="4"
+                        fill="#141416"
+                        stroke="#ffffff"
+                        strokeWidth="2"
+                      />
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+
+            {/* Right Y-Axis: Vehicle Counts */}
+            <div className="flex flex-col justify-between text-[11px] font-semibold text-slate-400 h-44 py-1 text-left w-7 shrink-0">
+              <span>80</span>
+              <span>60</span>
+              <span>40</span>
+              <span>20</span>
+              <span>0</span>
+            </div>
+          </div>
+
+          {/* Bottom X-Axis Days Labels */}
+          <div className="flex justify-around pl-10 pr-7 pt-2.5">
+            {chartDays.map((item, idx) => (
+              <div key={idx} className="flex flex-col items-center">
+                <span className="text-[11px] font-bold text-slate-700 leading-tight">
+                  {item.day}
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">
+                  {item.dateStr}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
     </div>
   );

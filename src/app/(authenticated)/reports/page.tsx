@@ -12,6 +12,8 @@ import { formatINR, formatDateTimeIST, formatTimeIST, formatDateIST, humanizeDur
 import { VEHICLE_TYPE_CONFIG, PAYMENT_METHOD_CONFIG, BUSINESS_NAME, SHIFT_CONFIG, ROLE_CONFIG } from "@/lib/constants";
 import type { ShiftType, EmployeeRole } from "@/lib/database.types";
 import { BillReceiptModal } from "@/components/bill-receipt-modal";
+import { useBackHandler } from "@/providers/back-button-provider";
+import { useLanguage } from "@/providers/language-provider";
 import {
   Download,
   IndianRupee,
@@ -29,18 +31,21 @@ import {
   CreditCard,
   UserCheck,
   ArrowLeft,
-  Printer
+  Printer,
+  FileText
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Capacitor } from "@capacitor/core";
 import { downloadNativeFile, sharePdfNative } from "@/lib/native-share";
 import { cn } from "@/lib/utils";
+import { AnimatedCount } from "@/components/animated-count";
 
 export default function ReportsPage() {
   const router = useRouter();
   const { employee } = useAuth();
   const { currentSiteId, authorizedSites, isAdmin } = useSite();
+  const { t, language } = useLanguage();
 
   const [startDate, setStartDate] = useState(getTodayDateString);
   const [endDate, setEndDate] = useState(getTodayDateString);
@@ -48,6 +53,8 @@ export default function ReportsPage() {
   const [selectedOperatorId, setSelectedOperatorId] = useState<string>("ALL");
   const [selectedShift, setSelectedShift] = useState<string>("ALL");
   const [selectedReceiptSession, setSelectedReceiptSession] = useState<any | null>(null);
+
+  useBackHandler(!!selectedReceiptSession, () => setSelectedReceiptSession(null), 20);
 
 
   // Fetch Sites for filter
@@ -64,11 +71,11 @@ export default function ReportsPage() {
 
   // Fetch Sessions for date range & site
   const { data: rawSessions, isLoading } = useQuery({
-    queryKey: ["reports", startDate, endDate, selectedSiteId, employee?.company_id],
+    queryKey: ["reports", startDate, endDate, selectedSiteId, selectedOperatorId, employee?.company_id],
     queryFn: async () => {
-      const companyId = employee?.company_id || localStorage.getItem("company_id") || "";
       const siteFilter = selectedSiteId === "ALL" ? undefined : selectedSiteId;
-      return await sessionsService.getReports(startDate, endDate, siteFilter, companyId);
+      const operatorFilter = selectedOperatorId === "ALL" ? undefined : selectedOperatorId;
+      return await sessionsService.getReports(startDate, endDate, siteFilter, operatorFilter);
     },
     refetchInterval: 30_000,
   });
@@ -376,97 +383,161 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="p-4 md:p-6 pb-36 space-y-5 max-w-2xl mx-auto font-sans">
+    <div className="p-4 md:p-6 pb-36 space-y-6 max-w-4xl mx-auto font-sans">
       
       {/* ────────── HEADER WITH BACK BUTTON ────────── */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 rv" style={{ ["--i" as any]: 0 }}>
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => router.push("/dashboard")}
-            className="w-9 h-9 rounded-full bg-muted/80 hover:bg-muted border border-border flex items-center justify-center text-foreground transition-colors active:scale-95"
+            onClick={() => router.push("/dashboard/")}
+            className="w-10 h-10 rounded-full bg-[var(--soft)] hover:bg-[var(--soft2)] border border-[var(--line)] flex items-center justify-center text-[var(--ink)] transition-colors active:scale-95"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-foreground tracking-tight">Operation Reports</h1>
-            <p className="text-xs text-muted-foreground font-medium mt-0.5">
-              Live multi-site & operator audit trail
+            <h1 className="text-xl sm:text-3xl font-extrabold text-[var(--ink)] tracking-tight">{t("reports.operationReports")}</h1>
+            <p className="text-xs text-[var(--ink3)] font-medium mt-0.5">
+              {t("reports.reportsSubtitle")}
             </p>
           </div>
         </div>
+
+        {/* Export Action Pills */}
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={exportCSV} 
+            disabled={!reportData?.sessions?.length}
+            className="vx-btn soft !py-2.5 !px-3.5 text-xs font-bold disabled:opacity-50"
+            title="Download CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span>CSV</span>
+          </button>
+          <button 
+            onClick={exportPDF} 
+            disabled={!reportData?.sessions?.length}
+            className="vx-btn soft !py-2.5 !px-3.5 text-xs font-bold disabled:opacity-50"
+            title="Download PDF"
+          >
+            <Download className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span>PDF</span>
+          </button>
+          <button 
+            onClick={sharePDF} 
+            disabled={!reportData?.sessions?.length}
+            className="vx-btn accent !py-2.5 !px-4 text-xs font-bold shadow-md disabled:opacity-50"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span>Share</span>
+          </button>
+        </div>
       </div>
 
+      {/* ────────── QUICK STATEMENTS (VERTIX REFERENCE REP CARDS) ────────── */}
+      <section className="vx-card rv" style={{ ["--i" as any]: 1 }}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-[var(--ink)]">Official Reports & Statements</h3>
+          <span className="text-xs text-[var(--ink3)]">Auto-compiled</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="flex items-center gap-3 p-3.5 bg-[var(--soft)] rounded-2xl border border-[var(--line)] hover:translate-x-1 transition-transform">
+            <div className="w-10 h-10 rounded-xl bg-[var(--card)] flex items-center justify-center text-[var(--accent)] shadow-sm shrink-0">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold text-[var(--ink)] truncate">Daily Parking Audit Summary</div>
+              <small className="block text-[10.5px] text-[var(--ink3)]">PDF Statement · {startDate} to {endDate}</small>
+            </div>
+            <button
+              type="button"
+              onClick={exportPDF}
+              disabled={!reportData?.sessions?.length}
+              className="vx-btn soft !py-1.5 !px-3 text-xs"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 p-3.5 bg-[var(--soft)] rounded-2xl border border-[var(--line)] hover:translate-x-1 transition-transform">
+            <div className="w-10 h-10 rounded-xl bg-[var(--card)] flex items-center justify-center text-emerald-600 shadow-sm shrink-0">
+              <IndianRupee className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold text-[var(--ink)] truncate">Shift Handover & Cash Audit</div>
+              <small className="block text-[10.5px] text-[var(--ink3)]">Full collection breakdown by staff</small>
+            </div>
+            <button
+              type="button"
+              onClick={exportCSV}
+              disabled={!reportData?.sessions?.length}
+              className="vx-btn soft !py-1.5 !px-3 text-xs"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </section>
 
       {/* ────────── FILTER CONTROLS ────────── */}
-      <div className="bg-card border border-border/80 rounded-3xl p-4 shadow-sm space-y-3.5">
+      <div className="vx-card p-5 space-y-4 rv" style={{ ["--i" as any]: 2 }}>
         
         {/* Quick Date Presets */}
-        <div className="flex gap-1.5 overflow-x-auto pb-1 hide-scrollbar">
-          <button
-            type="button"
-            onClick={() => setQuickDate("today")}
-            className="px-3 py-1 rounded-xl text-xs font-bold bg-muted hover:bg-primary/10 hover:text-primary transition-colors shrink-0"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={() => setQuickDate("yesterday")}
-            className="px-3 py-1 rounded-xl text-xs font-bold bg-muted hover:bg-primary/10 hover:text-primary transition-colors shrink-0"
-          >
-            Yesterday
-          </button>
-          <button
-            type="button"
-            onClick={() => setQuickDate("week")}
-            className="px-3 py-1 rounded-xl text-xs font-bold bg-muted hover:bg-primary/10 hover:text-primary transition-colors shrink-0"
-          >
-            Last 7 Days
-          </button>
-          <button
-            type="button"
-            onClick={() => setQuickDate("month")}
-            className="px-3 py-1 rounded-xl text-xs font-bold bg-muted hover:bg-primary/10 hover:text-primary transition-colors shrink-0"
-          >
-            This Month
-          </button>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-bold text-[var(--ink)]">Filter Period</span>
+          <div className="pill flex p-1 bg-[var(--soft)] gap-1 overflow-x-auto hide-scrollbar">
+            {[
+              { id: "today", label: t("reports.today") },
+              { id: "yesterday", label: t("reports.yesterday") },
+              { id: "week", label: t("reports.last7Days") },
+              { id: "month", label: t("reports.thisMonth") },
+            ].map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setQuickDate(p.id as any)}
+                className="px-3 py-1 text-xs font-bold rounded-full text-[var(--ink3)] hover:text-[var(--ink)] hover:bg-[var(--card)] transition-colors whitespace-nowrap"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Date Inputs */}
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[11px] font-bold text-muted-foreground block mb-1">From Date</label>
+            <label className="text-[11px] font-bold text-[var(--ink3)] block mb-1">{t("reports.fromDate")}</label>
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+              className="w-full h-11 px-3 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
           <div>
-            <label className="text-[11px] font-bold text-muted-foreground block mb-1">To Date</label>
+            <label className="text-[11px] font-bold text-[var(--ink3)] block mb-1">{t("reports.toDate")}</label>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+              className="w-full h-11 px-3 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
         </div>
 
         {/* Multi-Criteria Filters: Site, Operator, Shift */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 border-t border-border/60">
-          
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-[var(--line)]">
           {/* Site Filter */}
           <div>
-            <label className="text-[11px] font-bold text-muted-foreground block mb-1">Parking Site</label>
+            <label className="text-[11px] font-bold text-[var(--ink3)] block mb-1">{t("reports.parkingSite")}</label>
             <select
               value={selectedSiteId}
               onChange={(e) => setSelectedSiteId(e.target.value)}
-              className="w-full h-10 px-2.5 rounded-xl border border-input bg-background text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+              className="w-full h-11 px-3 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
             >
-              <option value="ALL">🏢 All Sites (Combined)</option>
+              <option value="ALL">🏢 {t("nav.allSites")}</option>
               {(sites || []).map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
@@ -475,13 +546,13 @@ export default function ReportsPage() {
 
           {/* Operator Filter */}
           <div>
-            <label className="text-[11px] font-bold text-muted-foreground block mb-1">Staff / Operator</label>
+            <label className="text-[11px] font-bold text-[var(--ink3)] block mb-1">{t("reports.staffOperator")}</label>
             <select
               value={selectedOperatorId}
               onChange={(e) => setSelectedOperatorId(e.target.value)}
-              className="w-full h-10 px-2.5 rounded-xl border border-input bg-background text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+              className="w-full h-11 px-3 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
             >
-              <option value="ALL">👥 All Operators</option>
+              <option value="ALL">👥 {t("reports.allOperators")}</option>
               {(employees || []).map((emp) => (
                 <option key={emp.id} value={emp.id}>{emp.name} ({ROLE_CONFIG[emp.role as EmployeeRole]?.label || emp.role})</option>
               ))}
@@ -490,88 +561,69 @@ export default function ReportsPage() {
 
           {/* Shift Filter */}
           <div>
-            <label className="text-[11px] font-bold text-muted-foreground block mb-1">Assigned Shift</label>
+            <label className="text-[11px] font-bold text-[var(--ink3)] block mb-1">{t("reports.assignedShift")}</label>
             <select
               value={selectedShift}
               onChange={(e) => setSelectedShift(e.target.value)}
-              className="w-full h-10 px-2.5 rounded-xl border border-input bg-background text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+              className="w-full h-11 px-3 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-xs font-semibold text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
             >
-              <option value="ALL">🕒 All Shifts</option>
+              <option value="ALL">🕒 {t("reports.allShifts")}</option>
               {Object.entries(SHIFT_CONFIG).map(([key, val]) => (
                 <option key={key} value={key}>{val.label} ({val.start}-{val.end})</option>
               ))}
             </select>
           </div>
-
         </div>
 
-      </div>
-
-      {/* ────────── EXPORT BUTTONS ────────── */}
-      <div className="grid grid-cols-3 gap-2">
-        <button 
-          onClick={exportCSV} 
-          disabled={!reportData?.sessions?.length}
-          className="flex items-center justify-center gap-1.5 border border-border bg-card py-2.5 rounded-2xl font-bold shadow-sm text-xs text-foreground hover:bg-muted transition-all active:scale-95 disabled:opacity-50"
-        >
-          <Download className="w-3.5 h-3.5 text-primary" /> CSV Data
-        </button>
-        <button 
-          onClick={exportPDF} 
-          disabled={!reportData?.sessions?.length}
-          className="flex items-center justify-center gap-1.5 border border-border bg-card py-2.5 rounded-2xl font-bold shadow-sm text-xs text-foreground hover:bg-muted transition-all active:scale-95 disabled:opacity-50"
-        >
-          <Download className="w-3.5 h-3.5 text-primary" /> PDF Audit
-        </button>
-        <button 
-          onClick={sharePDF} 
-          disabled={!reportData?.sessions?.length}
-          className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-primary to-orange-600 text-white py-2.5 rounded-2xl font-bold shadow-md shadow-primary/20 text-xs hover:opacity-95 transition-all active:scale-95 disabled:opacity-50"
-        >
-          <Share2 className="w-3.5 h-3.5" /> Share Report
-        </button>
       </div>
 
       {isLoading && (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          <Loader2 className="w-8 h-8 text-[var(--accent)] animate-spin" />
         </div>
       )}
 
       {!isLoading && reportData && (
-        <div className="space-y-4">
+        <div className="space-y-5">
           
-          {/* ────────── TOP TOTALS GRID ────────── */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* ────────── TOP TOTALS GRID WITH ANIMATED COUNTERS ────────── */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 rv" style={{ ["--i" as any]: 3 }}>
             
             {/* Total Revenue */}
-            <div className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+            <div className="vx-card flex flex-col justify-between">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Total Collection</span>
-                <div className="w-7 h-7 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                  <IndianRupee className="w-4 h-4" />
+                <span className="text-xs font-bold text-[var(--ink3)] uppercase tracking-wider">{t("reports.totalCollection")}</span>
+                <div className="w-8 h-8 rounded-full bg-[var(--accent)]/15 text-[var(--accent)] flex items-center justify-center font-bold">
+                  ₹
                 </div>
               </div>
-              <div>
-                <p className="text-2xl sm:text-3xl font-black text-primary">{formatINR(reportData.totalRevenue)}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {reportData.completedCount} paid transactions
+              <div className="my-2">
+                <AnimatedCount
+                  value={reportData.totalRevenue}
+                  formatter={formatINR}
+                  className="text-3xl sm:text-4xl font-black text-[var(--accent)]"
+                />
+                <p className="text-xs text-[var(--ink3)] mt-1 font-medium">
+                  {reportData.completedCount} {t("reports.paidTransactions")}
                 </p>
               </div>
             </div>
 
             {/* Total Entries */}
-            <div className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+            <div className="vx-card flex flex-col justify-between">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Vehicles Logged</span>
-                <div className="w-7 h-7 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                <span className="text-xs font-bold text-[var(--ink3)] uppercase tracking-wider">{t("reports.vehiclesLogged")}</span>
+                <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-600 flex items-center justify-center">
                   <Car className="w-4 h-4" />
                 </div>
               </div>
-              <div>
-                <p className="text-2xl sm:text-3xl font-black text-foreground">{reportData.totalVehicles}</p>
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-semibold">
-                  {reportData.activeCount} currently parked
+              <div className="my-2">
+                <AnimatedCount
+                  value={reportData.totalVehicles}
+                  className="text-3xl sm:text-4xl font-black text-[var(--ink)]"
+                />
+                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
+                  {reportData.activeCount} {t("reports.currentlyParked")}
                 </p>
               </div>
             </div>
@@ -579,117 +631,121 @@ export default function ReportsPage() {
           </div>
 
           {/* ────────── PAYMENT METHOD CHIPS ────────── */}
-          <div className="grid grid-cols-3 gap-2">
-            <div className="bg-card border border-border/80 rounded-2xl p-3 text-center shadow-sm">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase block">Cash in Hand</span>
-              <span className="text-sm font-black text-emerald-600 dark:text-emerald-400 block mt-0.5">{formatINR(reportData.totalCash)}</span>
+          <div className="grid grid-cols-3 gap-3 rv" style={{ ["--i" as any]: 4 }}>
+            <div className="vx-card p-4 text-center">
+              <span className="text-[10.5px] font-bold text-[var(--ink3)] uppercase block">{t("reports.cashInHand")}</span>
+              <span className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 block mt-1">
+                {formatINR(reportData.totalCash)}
+              </span>
             </div>
-            <div className="bg-card border border-border/80 rounded-2xl p-3 text-center shadow-sm">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase block">UPI / Online</span>
-              <span className="text-sm font-black text-blue-600 dark:text-blue-400 block mt-0.5">{formatINR(reportData.totalUpi)}</span>
+            <div className="vx-card p-4 text-center">
+              <span className="text-[10.5px] font-bold text-[var(--ink3)] uppercase block">{t("reports.upiOnline")}</span>
+              <span className="text-base sm:text-lg font-black text-blue-600 dark:text-blue-400 block mt-1">
+                {formatINR(reportData.totalUpi)}
+              </span>
             </div>
-            <div className="bg-card border border-border/80 rounded-2xl p-3 text-center shadow-sm">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase block">Discounts</span>
-              <span className="text-sm font-black text-red-500 block mt-0.5">{formatINR(reportData.totalDiscount)}</span>
+            <div className="vx-card p-4 text-center">
+              <span className="text-[10.5px] font-bold text-[var(--ink3)] uppercase block">{t("reports.discounts")}</span>
+              <span className="text-base sm:text-lg font-black text-red-500 block mt-1">
+                {formatINR(reportData.totalDiscount)}
+              </span>
             </div>
           </div>
 
           {/* ────────── OPERATOR PERFORMANCE BREAKDOWN ────────── */}
-          <div className="bg-card border border-border rounded-[28px] p-5 shadow-sm space-y-3.5">
-            <div className="flex items-center justify-between border-b border-border/80 pb-3">
+          <div className="vx-card p-5 space-y-4 rv" style={{ ["--i" as any]: 5 }}>
+            <div className="flex items-center justify-between border-b border-[var(--line)] pb-3">
               <div>
-                <h3 className="text-sm font-bold text-foreground flex items-center gap-1.5">
-                  <Users className="w-4 h-4 text-primary" />
-                  <span>Operator Performance & Cash Audit</span>
+                <h3 className="text-sm font-bold text-[var(--ink)] flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-[var(--accent)]" />
+                  <span>{t("reports.operatorAudit")}</span>
                 </h3>
-                <p className="text-[11px] text-muted-foreground">Breakdown of entries, exits, and collections by staff</p>
+                <p className="text-xs text-[var(--ink3)]">{t("reports.operatorAuditDesc")}</p>
               </div>
             </div>
 
-            <div className="space-y-2.5">
+            <div className="space-y-3">
               {reportData.operatorBreakdown.map((op) => (
-                <div key={op.id} className="p-3.5 rounded-2xl bg-muted/60 border border-border/80 space-y-2">
+                <div key={op.id} className="p-4 rounded-2xl bg-[var(--soft)] border border-[var(--line)] space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--accent)] to-[var(--accent2)] text-white font-bold text-xs flex items-center justify-center shadow-sm">
                         {op.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <h4 className="text-xs font-bold text-foreground">{op.name}</h4>
-                        <p className="text-[10px] text-muted-foreground">{op.mobile}</p>
+                        <h4 className="text-xs font-bold text-[var(--ink)]">{op.name}</h4>
+                        <p className="text-[10px] text-[var(--ink3)]">{op.mobile}</p>
                       </div>
                     </div>
                     {op.shift && (
-                      <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-[10px] font-bold">
-                        {SHIFT_CONFIG[op.shift as ShiftType]?.label || op.shift} Shift
+                      <span className="px-2.5 py-1 rounded-full bg-[var(--card)] text-[var(--ink)] border border-[var(--line)] text-[10px] font-bold">
+                        {SHIFT_CONFIG[op.shift as ShiftType]?.label || op.shift}
                       </span>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-4 gap-2 pt-2 border-t border-border/40 text-center">
+                  <div className="grid grid-cols-4 gap-2 pt-2.5 border-t border-[var(--line)] text-center">
                     <div>
-                      <span className="text-[10px] text-muted-foreground block">Entries</span>
-                      <span className="text-xs font-bold text-foreground">{op.entriesCount}</span>
+                      <span className="text-[10px] text-[var(--ink3)] font-semibold block">{t("reports.entries")}</span>
+                      <span className="text-xs font-extrabold text-[var(--ink)]">{op.entriesCount}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-muted-foreground block">Exits</span>
-                      <span className="text-xs font-bold text-foreground">{op.exitsCount}</span>
+                      <span className="text-[10px] text-[var(--ink3)] font-semibold block">{t("reports.exits")}</span>
+                      <span className="text-xs font-extrabold text-[var(--ink)]">{op.exitsCount}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-muted-foreground block">Cash</span>
-                      <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatINR(op.cashCollected)}</span>
+                      <span className="text-[10px] text-[var(--ink3)] font-semibold block">{t("reports.cash")}</span>
+                      <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400">{formatINR(op.cashCollected)}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-muted-foreground block">Total</span>
-                      <span className="text-xs font-black text-primary">{formatINR(op.totalCollected)}</span>
+                      <span className="text-[10px] text-[var(--ink3)] font-semibold block">{t("reports.total")}</span>
+                      <span className="text-xs font-black text-[var(--accent)]">{formatINR(op.totalCollected)}</span>
                     </div>
                   </div>
                 </div>
               ))}
 
               {reportData.operatorBreakdown.length === 0 && (
-                <div className="text-center py-6 text-xs text-muted-foreground">No operator activity for selected filters</div>
+                <div className="text-center py-6 text-xs text-[var(--ink3)]">{t("reports.noActivity")}</div>
               )}
             </div>
           </div>
 
           {/* ────────── DETAILED SESSION LOG ────────── */}
-          <div className="bg-card border border-border rounded-[28px] p-4 shadow-sm space-y-2">
-            <h3 className="text-xs font-bold text-foreground px-1 pb-1">
-              Vehicle Transaction Register ({reportData.sessions.length})
+          <div className="vx-card p-5 space-y-3 rv" style={{ ["--i" as any]: 6 }}>
+            <h3 className="text-sm font-bold text-[var(--ink)]">
+              {t("reports.transactionRegister")} ({reportData.sessions.length})
             </h3>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {reportData.sessions.slice(0, 50).map((s: any) => {
                 const payment = Array.isArray(s.payment) ? s.payment[0] : s.payment;
                 return (
                   <div
                     key={s.id}
                     onClick={() => setSelectedReceiptSession(s)}
-                    className="p-3 rounded-2xl bg-muted/40 hover:bg-muted transition-colors flex items-center justify-between text-xs cursor-pointer active:scale-[0.99]"
+                    className="p-3.5 rounded-2xl bg-[var(--soft)] hover:bg-[var(--soft2)] border border-[var(--line)] transition-all flex items-center justify-between text-xs cursor-pointer active:scale-[0.99]"
                   >
                     <div>
-                      <div className="font-mono font-bold text-foreground">{s.vehicle_number}</div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1.5">
-                        <span>{s.site_name || "Site"}</span>
+                      <div className="font-mono font-bold text-[var(--ink)]">{s.vehicle_number}</div>
+                      <div className="text-[10.5px] text-[var(--ink3)] mt-0.5 flex flex-wrap items-center gap-1.5">
+                        <span>{s.site_name || t("gate.mainSite")}</span>
                         <span>•</span>
-                        <span>In: {formatTimeIST(s.entry_at)} ({s.entry_operator?.name?.split(" ")[0] || "Staff"})</span>
+                        <span>{t("search.entryTime")}: {formatTimeIST(s.entry_at)} ({s.entry_operator?.name?.split(" ")[0] || t("common.staff")})</span>
                         {s.exit_at && (
                           <>
                             <span>•</span>
-                            <span>Out: {formatTimeIST(s.exit_at)}</span>
+                            <span>{t("search.exitTime")}: {formatTimeIST(s.exit_at)}</span>
                           </>
                         )}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="font-bold text-foreground">
+
+                    <div className="text-right shrink-0">
+                      <div className="font-black text-xs sm:text-sm text-[var(--accent)]">
                         {payment?.amount ? formatINR(payment.amount) : (s.gross_amount ? formatINR(s.gross_amount) : "-")}
                       </div>
-                      <span className={cn(
-                        "text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full inline-block mt-0.5",
-                        s.status === "COMPLETED" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/10 text-amber-600"
-                      )}>
-                        {payment?.method ? `${payment.method} • ` : ""}{s.status}
+                      <span className="vx-badge vx-up mt-0.5">
+                        {s.status}
                       </span>
                     </div>
                   </div>
@@ -697,8 +753,8 @@ export default function ReportsPage() {
               })}
 
               {reportData.sessions.length === 0 && (
-                <div className="text-center py-8 text-xs text-muted-foreground font-medium">
-                  No sessions found matching selected filters
+                <div className="text-center py-8 text-xs text-[var(--ink3)] font-medium">
+                  {t("reports.noSessions")}
                 </div>
               )}
             </div>

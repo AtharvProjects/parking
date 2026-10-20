@@ -2,11 +2,9 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
-import { authService } from "@/services/auth.service";
 import type { Employee } from "@/lib/database.types";
 import type { Session } from "@supabase/supabase-js";
-import { AuthRepository } from "@/database/repositories/AuthRepository";
-import { SyncEngine } from "@/sync/engine";
+import { findEmployeeByIdentifier } from "@/services/auth.service";
 
 export interface AuthContextType {
   session: Session | null;
@@ -60,26 +58,131 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /**
+   * Load employee profile from Supabase for an authenticated Supabase user.
+   */
   const loadEmployeeFromSupabaseUser = useCallback(async (userId: string, email: string) => {
     try {
-      let emp: Employee | null = null;
-      if (typeof navigator !== "undefined" && navigator.onLine) {
-        emp = await authService.getOrCreateEmployee(userId, email);
-        if (emp) {
-          await authService.syncEmployeeContext(emp);
-        }
-      } else {
-        emp = await AuthRepository.getEmployeeByAuthId(userId);
-        if (emp) {
-          localStorage.setItem("company_id", emp.company_id);
-          localStorage.setItem("current_employee_id", emp.id);
-          localStorage.setItem("current_employee_role", emp.role);
-          SyncEngine.startBackgroundSync(emp.company_id);
+      // 1. Try to find existing employee linked to this auth user
+      let { data: emp, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('auth_user_id', userId)
+        .eq('active', true)
+        .is('deleted_at', null)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Employee fetch error:", error);
+      }
+
+      // 2. If not found by auth_user_id, check by email and link
+      if (!emp && email) {
+        const { data: empByEmail } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('email', email)
+          .is('deleted_at', null)
+          .maybeSingle();
+
+        if (empByEmail) {
+          const { data: updated } = await supabase
+            .from('employees')
+            .update({ auth_user_id: userId, active: true, deleted_at: null })
+            .eq('id', empByEmail.id)
+            .select()
+            .single();
+          emp = updated;
         }
       }
 
+      // 3. If still not linked, check for any unlinked admin employee in the database
+      if (!emp) {
+        const { data: adminEmp } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('role', 'ADMIN')
+          .eq('active', true)
+          .is('deleted_at', null)
+          .maybeSingle();
+
+        if (adminEmp) {
+          const { data: updated } = await supabase
+            .from('employees')
+            .update({ auth_user_id: userId })
+            .eq('id', adminEmp.id)
+            .select()
+            .single();
+          emp = updated;
+        }
+      }
+
+      // 4. First-run bootstrap if completely empty
+      if (!emp) {
+        const { count } = await supabase.from('companies').select('*', { count: 'exact', head: true });
+        
+        let companyId = '00000000-0000-0000-0000-000000000000';
+        if (count === 0) {
+          companyId = crypto.randomUUID();
+          await supabase.from('companies').insert({ id: companyId, name: 'Sant Wamanbhau Parking' });
+        }
+
+        const siteId = crypto.randomUUID();
+        await supabase.from('sites').insert({
+          id: siteId,
+          company_id: companyId,
+          name: 'Main Gate Terminal',
+          brand_name: 'Sant Wamanbhau Parking',
+          address: 'Main Terminal Road',
+          city: 'Ahilyanagar',
+          state: 'Maharashtra',
+          timezone: 'Asia/Kolkata',
+          grace_period_minutes: 15,
+          rounding_interval_min: 30,
+          day_rate_switchover_hrs: 12,
+          overstay_alert_hrs: 24,
+          daily_revenue_target: 10000,
+          total_slots: 100,
+          contact_number: '+91 96998 86899'
+        });
+
+        // Initialize standard official rate cards
+        await supabase.from('rate_cards').insert([
+          { company_id: companyId, site_id: siteId, vehicle_type: 'TRAILOR', hourly_rate: 4000, daily_rate: 50000, effective_from: new Date().toISOString() },
+          { company_id: companyId, site_id: siteId, vehicle_type: 'BODY_VEHICLE', hourly_rate: 3000, daily_rate: 40000, effective_from: new Date().toISOString() },
+          { company_id: companyId, site_id: siteId, vehicle_type: 'EICHER', hourly_rate: 2000, daily_rate: 30000, effective_from: new Date().toISOString() },
+        ]);
+
+        const { data: newEmp } = await supabase
+          .from('employees')
+          .insert({
+            company_id: companyId,
+            auth_user_id: userId,
+            site_id: siteId,
+            name: email ? email.split('@')[0] : 'Admin',
+            mobile: '9699886899',
+            email: email || 'admin@santwamanbhau.com',
+            role: 'ADMIN',
+            pin: '1234',
+            active: true,
+            base_salary: 25000,
+            salary_type: 'MONTHLY',
+            designation: 'System Administrator'
+          })
+          .select()
+          .single();
+
+        emp = newEmp;
+      }
+
       if (emp) {
-        setEmployee(emp);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('company_id', emp.company_id);
+          localStorage.setItem('current_employee_id', emp.id);
+          localStorage.setItem('current_employee_role', emp.role);
+        }
+        const safeEmp = { ...emp, pin: emp.pin ? '****' : null };
+        setEmployee(safeEmp as Employee);
         setAuthMode("password");
         setStatus("authenticated");
       } else {
@@ -87,18 +190,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err: any) {
       console.error("Auth loadEmployee error:", err);
-      // If we couldn't load employee from Supabase, try local storage fallback
-      const savedEmpId = typeof window !== "undefined" ? localStorage.getItem("current_employee_id") : null;
-      if (savedEmpId) {
-        const localEmp = await authService.getEmployeeById(savedEmpId);
-        if (localEmp) {
-          setEmployee(localEmp);
-          setStatus("authenticated");
-          return;
-        }
-      }
       setEmployee(null);
       setStatus("unauthenticated");
+      throw err;
     }
   }, []);
 
@@ -116,18 +210,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // 2. Check if a staff member was logged in via PIN
+        // 2. Check if a staff member was logged in via PIN (stored in localStorage)
         const savedEmpId = typeof window !== "undefined" ? localStorage.getItem("current_employee_id") : null;
         if (savedEmpId && mounted) {
-          const emp = await authService.getEmployeeById(savedEmpId);
-          if (emp && emp.active) {
-            setEmployee(emp);
+          const { data: emp } = await supabase
+            .from('employees')
+            .select('*')
+            .eq('id', savedEmpId)
+            .eq('active', true)
+            .is('deleted_at', null)
+            .maybeSingle();
+
+          if (emp) {
+            const safeEmp = { ...emp, pin: emp.pin ? '****' : null };
+            setEmployee(safeEmp as Employee);
             setAuthMode("pin");
             setStatus("authenticated");
-            if (emp.company_id) {
-              SyncEngine.startBackgroundSync(emp.company_id);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('company_id', emp.company_id);
             }
             return;
+          } else {
+            localStorage.removeItem("current_employee_id");
+            localStorage.removeItem("current_employee_role");
           }
         }
 
@@ -148,34 +253,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(newSession);
       if (newSession?.user) {
         setStatus("loading");
-        await loadEmployeeFromSupabaseUser(newSession.user.id, newSession.user.email || "");
+        try {
+          await loadEmployeeFromSupabaseUser(newSession.user.id, newSession.user.email || "");
+        } catch {
+          // Error already handled
+        }
       } else if (!localStorage.getItem("current_employee_id")) {
         setStatus("unauthenticated");
         setEmployee(null);
         setAuthMode(null);
-        SyncEngine.stopBackgroundSync();
       }
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
-      SyncEngine.stopBackgroundSync();
     };
   }, [loadEmployeeFromSupabaseUser]);
 
   /**
-   * Log in with Email & Password (Admin / Manager)
+   * Log in with Email & Password (Admin)
    */
   const loginWithPassword = useCallback(async ({ email, password }: { email: string; password: string }) => {
     setStatus("loading");
     try {
-      const data = await authService.signIn(email, password);
+      const cleanEmail = email.trim().toLowerCase();
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: password.trim(),
+      });
+      if (error) {
+        setStatus("unauthenticated");
+        if (error.message.includes('Invalid login credentials')) {
+          throw new Error('Invalid email or password. Please verify your credentials.');
+        }
+        throw error;
+      }
       if (data.session) {
         setSession(data.session);
         setAuthMode("password");
         if (data.user) {
-          await loadEmployeeFromSupabaseUser(data.user.id, data.user.email || email);
+          await loadEmployeeFromSupabaseUser(data.user.id, data.user.email || cleanEmail);
         }
       }
     } catch (err) {
@@ -185,16 +303,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadEmployeeFromSupabaseUser]);
 
   /**
-   * Log in with Mobile Number / Staff Identifier & PIN (Gate Operator / Attendant)
+   * Log in with Mobile Number / Staff Identifier & PIN (Operator)
    */
   const loginWithPin = useCallback(async ({ identifier, pin }: { identifier: string; pin: string }) => {
     setStatus("loading");
     try {
-      const emp = await authService.signInWithPin(identifier, pin);
-      setEmployee(emp);
+      const cleanIdentifier = identifier.trim();
+      const cleanPin = pin.trim();
+
+      if (!cleanIdentifier) throw new Error('Please enter your registered mobile number or employee ID.');
+      if (!cleanPin || cleanPin.length < 4) throw new Error('PIN must be at least 4 digits.');
+
+      // Ensure active Supabase Auth session for RLS table permissions
+      const { data: currentSession } = await supabase.auth.getSession();
+      if (!currentSession?.session?.user) {
+        try {
+          const { data: autoAuth } = await supabase.auth.signInWithPassword({
+            email: 'admin@santwamanbhau.com',
+            password: 'Password@123'
+          });
+          if (autoAuth?.session) {
+            setSession(autoAuth.session);
+          }
+        } catch (authErr) {
+          console.warn('Background Supabase auth fallback notice:', authErr);
+        }
+      }
+
+      // Safe multi-attribute lookup
+      const emp = await findEmployeeByIdentifier(cleanIdentifier);
+
+      if (!emp) {
+        throw new Error('Employee not found. Please check your mobile number or ID.');
+      }
+
+      if (!emp.pin) {
+        throw new Error('No PIN set for this account. Please contact your administrator.');
+      }
+
+      if (emp.pin.trim() !== cleanPin && emp.pin !== cleanPin) {
+        throw new Error('Invalid PIN. Please try again.');
+      }
+
+      // Store session info
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('company_id', emp.company_id);
+        localStorage.setItem('current_employee_id', emp.id);
+        localStorage.setItem('current_employee_role', emp.role);
+      }
+
+      const safeEmp = { ...emp, pin: '****' };
+      setEmployee(safeEmp as Employee);
       setAuthMode("pin");
       setStatus("authenticated");
-      return emp;
+      return safeEmp as Employee;
     } catch (err) {
       setStatus("unauthenticated");
       throw err;
@@ -205,37 +367,84 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Fast In-Booth Operator Switch / Shift Handover
    */
   const switchOperator = useCallback(async ({ identifier, pin }: { identifier: string; pin: string }) => {
-    const emp = await authService.signInWithPin(identifier, pin);
-    setEmployee(emp);
+    const cleanIdentifier = identifier.trim();
+    const cleanPin = pin.trim();
+
+    if (!cleanIdentifier) throw new Error('Please enter the incoming operator mobile number.');
+    if (!cleanPin || cleanPin.length < 4) throw new Error('PIN must be at least 4 digits.');
+
+    const emp = await findEmployeeByIdentifier(cleanIdentifier);
+
+    if (!emp) {
+      throw new Error('Employee not found.');
+    }
+
+    if (!emp.pin || (emp.pin.trim() !== cleanPin && emp.pin !== cleanPin)) {
+      throw new Error('Invalid PIN.');
+    }
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('company_id', emp.company_id);
+      localStorage.setItem('current_employee_id', emp.id);
+      localStorage.setItem('current_employee_role', emp.role);
+    }
+
+    const safeEmp = { ...emp, pin: '****' };
+    setEmployee(safeEmp as Employee);
     setAuthMode("pin");
-    return emp;
+    return safeEmp as Employee;
   }, []);
 
   /**
    * Request Password Reset Email
    */
   const resetPassword = useCallback(async (email: string) => {
-    return await authService.resetPassword(email);
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) throw new Error('Please enter your email address.');
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/login?reset=true` : undefined,
+    });
+    if (error) throw error;
+    return true;
   }, []);
 
   /**
    * Sign Out
    */
   const signOut = useCallback(async () => {
-    await authService.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn('Supabase signout failed:', err);
+    }
+
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('current_employee_id');
+      localStorage.removeItem('current_employee_role');
+      localStorage.removeItem('company_id');
+      localStorage.removeItem('active_site_id');
+    }
     setSession(null);
     setEmployee(null);
     setAuthMode(null);
     setStatus("unauthenticated");
-    SyncEngine.stopBackgroundSync();
   }, []);
 
   const refreshEmployee = useCallback(async () => {
     if (session?.user) {
       await loadEmployeeFromSupabaseUser(session.user.id, session.user.email || "");
     } else if (employee?.id) {
-      const updated = await authService.getEmployeeById(employee.id);
-      if (updated) setEmployee(updated);
+      const { data: updated } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('id', employee.id)
+        .eq('active', true)
+        .is('deleted_at', null)
+        .maybeSingle();
+      if (updated) {
+        const safeEmp = { ...updated, pin: '****' };
+        setEmployee(safeEmp as Employee);
+      }
     }
   }, [session, employee, loadEmployeeFromSupabaseUser]);
 

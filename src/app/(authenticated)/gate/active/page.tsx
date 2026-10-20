@@ -15,6 +15,8 @@ import type { ActiveVehicle, PaymentMethod, SessionWithRelations } from "@/lib/d
 import { cn } from "@/lib/utils";
 import { QRCodeSVG } from "qrcode.react";
 import { BillReceiptModal } from "@/components/bill-receipt-modal";
+import { useBackHandler } from "@/providers/back-button-provider";
+import { useLanguage } from "@/providers/language-provider";
 import {
   Search,
   Clock,
@@ -29,13 +31,20 @@ import {
   Camera as CameraIcon,
   ArrowLeft,
   Building2,
-  Car
+  Car,
+  Phone,
+  User,
+  FileText,
+  Image as ImageIcon,
+  Plus,
+  ChevronRight
 } from "lucide-react";
 
 export default function ActiveVehiclesPage() {
   const router = useRouter();
   const { employee } = useAuth();
   const { currentSite, currentSiteId, isAdmin } = useSite();
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -44,6 +53,10 @@ export default function ActiveVehiclesPage() {
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [completedSession, setCompletedSession] = useState<SessionWithRelations | null>(null);
   const [viewPhotosVehicle, setViewPhotosVehicle] = useState<ActiveVehicle | null>(null);
+
+  useBackHandler(showExitDialog, () => { setShowExitDialog(false); setSelectedVehicle(null); }, 20);
+  useBackHandler(!!completedSession, () => setCompletedSession(null), 25);
+  useBackHandler(!!viewPhotosVehicle, () => setViewPhotosVehicle(null), 15);
 
   const querySiteId = currentSiteId === "ALL" ? "" : currentSiteId;
 
@@ -106,11 +119,16 @@ export default function ActiveVehiclesPage() {
     },
   });
 
-  const filtered = (vehicles || []).filter(
-    (v) =>
+  const [selectedType, setSelectedType] = useState<string>("ALL");
+
+  const filtered = (vehicles || []).filter((v) => {
+    const matchesSearch =
       v.vehicle_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      v.driver_number.includes(searchQuery)
-  );
+      v.driver_number.includes(searchQuery) ||
+      (v.driver_name && v.driver_name.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesType = selectedType === "ALL" || v.vehicle_type === selectedType;
+    return matchesSearch && matchesType;
+  });
 
   const calculateBilling = (vehicle: ActiveVehicle) => {
     const rate = activeRates?.find((r) => r.vehicle_type === vehicle.vehicle_type);
@@ -128,7 +146,6 @@ export default function ActiveVehiclesPage() {
     return computeCharges(new Date(vehicle.entry_at), new Date(), rateInfo, config);
   };
 
-
   const handleInitiateExit = (vehicle: ActiveVehicle) => {
     setSelectedVehicle(vehicle);
     setPaymentMethod("CASH");
@@ -139,136 +156,187 @@ export default function ActiveVehiclesPage() {
   const billingResult = selectedVehicle ? calculateBilling(selectedVehicle) : null;
 
   return (
-    <div className="p-4 md:p-6 pb-36 max-w-2xl mx-auto space-y-5 font-sans">
+    <div className="p-4 md:p-6 pb-36 max-w-4xl mx-auto space-y-5 font-sans">
       
       {/* ────────── TOP BAR WITH BACK BUTTON & SITE CONTEXT ────────── */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between rv" style={{ ["--i" as any]: 0 }}>
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => router.push("/dashboard")}
-            className="w-9 h-9 rounded-full bg-muted/80 hover:bg-muted border border-border flex items-center justify-center text-foreground transition-colors active:scale-95"
+            onClick={() => router.push("/dashboard/")}
+            className="w-10 h-10 rounded-full bg-[var(--soft)] hover:bg-[var(--soft2)] border border-[var(--line)] flex items-center justify-center text-[var(--ink)] transition-colors active:scale-95"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-foreground tracking-tight">Active Vehicles</h1>
-            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-              <Building2 className="w-3 h-3 text-primary" />
-              <span>{currentSiteId === "ALL" ? "All Sites (Combined)" : (site?.name || "Terminal")}</span>
+            <h1 className="text-xl sm:text-3xl font-extrabold text-[var(--ink)] tracking-tight">{t.activeVehicles.title}</h1>
+            <p className="text-xs text-[var(--ink3)] flex items-center gap-1.5 mt-0.5">
+              <Building2 className="w-3.5 h-3.5 text-[var(--accent)]" />
+              <span>{currentSiteId === "ALL" ? t.nav.allSites : (site?.name || t.dashboard.terminal)}</span>
             </p>
           </div>
         </div>
 
-        <div className="px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-bold">
-          {vehicles?.length || 0} Parked
+        <div className="pill flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold text-[var(--ink)] bg-[var(--soft)]">
+          <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
+          <span>{vehicles?.length || 0} {t.activeVehicles.parked}</span>
         </div>
       </div>
 
-      {/* ────────── SEARCH BAR ────────── */}
-      <div className="relative">
-        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search by vehicle number or mobile..."
-          className="w-full h-11 pl-10 pr-4 rounded-xl border border-input bg-card text-xs font-mono font-medium focus:outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/70 shadow-sm"
-        />
-        {searchQuery && (
-          <button
-            type="button"
-            onClick={() => setSearchQuery("")}
-            className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        )}
+      {/* ────────── SEARCH & CATEGORY FILTER CHIPS ────────── */}
+      <div className="flex flex-col sm:flex-row gap-3 rv" style={{ ["--i" as any]: 1 }}>
+        <div className="vx-sbox flex-1">
+          <Search className="w-4 h-4 text-[var(--ink3)] shrink-0" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t.activeVehicles.searchPlaceholder}
+            className="w-full text-xs font-mono font-medium"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="text-[var(--ink3)] hover:text-[var(--ink)]"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Category Filter Pills */}
+        <div className="pill flex p-1 bg-[var(--soft)] gap-1 overflow-x-auto hide-scrollbar">
+          {[
+            { id: "ALL", label: "All" },
+            { id: "TWO_WHEELER", label: "2-Wheeler" },
+            { id: "FOUR_WHEELER", label: "4-Wheeler" },
+            { id: "AUTO", label: "Auto" },
+            { id: "BUS", label: "Heavy / Bus" },
+          ].map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => setSelectedType(cat.id)}
+              className={cn(
+                "px-3 py-1.5 text-xs font-bold rounded-full transition-all whitespace-nowrap",
+                selectedType === cat.id
+                  ? "bg-[var(--card)] text-[var(--ink)] shadow-sm"
+                  : "text-[var(--ink3)] hover:text-[var(--ink)]"
+              )}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ────────── VEHICLES LIST ────────── */}
       {isVehiclesLoading ? (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <Loader2 className="w-7 h-7 text-primary animate-spin" />
-          <p className="text-xs text-muted-foreground font-medium">Loading parked vehicles...</p>
+          <Loader2 className="w-8 h-8 text-[var(--accent)] animate-spin" />
+          <p className="text-xs text-[var(--ink3)] font-medium">{t.activeVehicles.loadingParkedVehicles}</p>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 bg-card border border-border/80 rounded-3xl p-6 shadow-sm">
-          <div className="w-14 h-14 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center mx-auto mb-3">
-            <Car className="w-7 h-7" />
+        <div className="text-center py-16 vx-card p-8">
+          <div className="w-14 h-14 rounded-2xl bg-[var(--soft)] text-[var(--ink3)] flex items-center justify-center mx-auto mb-3">
+            <Car className="w-7 h-7 text-[var(--accent)]" />
           </div>
-          <h3 className="text-sm font-bold text-foreground mb-1">
-            {searchQuery ? "No matching vehicles" : "No vehicles parked"}
+          <h3 className="text-base font-bold text-[var(--ink)] mb-1">
+            {searchQuery ? t("activeVehicles.noMatchingVehicles") : t("activeVehicles.noActiveVehicles")}
           </h3>
-          <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-            {searchQuery ? "Check the search term or try searching another site." : "The parking lot is currently empty for this site."}
+          <p className="text-xs text-[var(--ink3)] max-w-xs mx-auto">
+            {searchQuery ? t("activeVehicles.checkSearchOrSite") : t("activeVehicles.lotCurrentlyEmpty")}
           </p>
           <button
             type="button"
-            onClick={() => router.push("/gate")}
-            className="mt-4 px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold shadow-md shadow-primary/20 hover:opacity-95 transition-opacity"
+            onClick={() => router.push("/gate/")}
+            className="mt-5 vx-btn accent text-xs"
           >
-            + Register New Vehicle
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>{t("activeVehicles.registerNewVehicle")}</span>
           </button>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map((vehicle) => {
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 rv" style={{ ["--i" as any]: 2 }}>
+          {filtered.map((vehicle, idx) => {
             const config = VEHICLE_TYPE_CONFIG[vehicle.vehicle_type];
             return (
               <div
                 key={vehicle.id}
-                className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm hover:border-primary/40 transition-all flex items-center justify-between gap-3"
+                className="vx-card p-4 flex flex-col justify-between gap-3 hover:translate-y-[-2px] transition-transform"
+                style={{ animationDelay: `${idx * 40}ms` }}
               >
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-11 h-11 rounded-xl bg-muted flex items-center justify-center text-xl shrink-0">
-                    {config?.icon || "🚗"}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-mono font-black text-sm text-foreground tracking-wide truncate">
-                        {vehicle.vehicle_number}
-                      </h4>
-                      {vehicle.is_overstaying && (
-                        <span className="px-1.5 py-0.5 rounded-md bg-red-500/10 text-red-600 dark:text-red-400 text-[10px] font-bold shrink-0 flex items-center gap-1">
-                          <AlertTriangle className="w-2.5 h-2.5" /> Overstay
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-11 h-11 rounded-2xl bg-[var(--soft)] flex items-center justify-center text-xl shrink-0 border border-[var(--line)]">
+                      {config?.icon || "🚗"}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-mono font-black text-sm sm:text-base text-[var(--ink)] tracking-wide truncate">
+                          {vehicle.vehicle_number}
+                        </h4>
+                        {vehicle.is_overstaying && (
+                          <span className="vx-badge vx-down">
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            <span>Overstay</span>
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-[var(--ink3)] mt-1">
+                        <span className="font-semibold text-[var(--ink2)]">{config?.label || vehicle.vehicle_type}</span>
+                        <span>•</span>
+                        <span className="flex items-center gap-1 font-semibold text-[var(--ink)] font-mono">
+                          <Clock className="w-3 h-3 text-[var(--accent)]" />
+                          {humanizeDuration(vehicle.elapsed_minutes)}
                         </span>
+                      </div>
+                      {(vehicle.driver_name || vehicle.driver_number) && (
+                        <p className="text-[11px] font-medium text-[var(--ink2)] mt-1 truncate">
+                          👤 {vehicle.driver_name ? `${vehicle.driver_name} ` : ""}{vehicle.driver_number ? `(${vehicle.driver_number})` : ""}
+                        </p>
+                      )}
+                      {vehicle.notes && (
+                        <p className="text-[10px] text-[var(--ink3)] mt-0.5 truncate">
+                          📍 {vehicle.notes}
+                        </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
-                      <span>{config?.label || vehicle.vehicle_type}</span>
-                      <span>•</span>
-                      <span className="flex items-center gap-1 font-medium text-foreground">
-                        <Clock className="w-3 h-3 text-muted-foreground" />
-                        {humanizeDuration(vehicle.elapsed_minutes)}
-                      </span>
-                    </div>
-                    {vehicle.notes && (
-                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                        📍 {vehicle.notes}
-                      </p>
-                    )}
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <span className="vx-stt text-xs">
+                      Parked
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  {vehicle.vehicle_photos && (
+                <div className="flex items-center justify-between pt-2.5 border-t border-[var(--line)] mt-1">
+                  <div className="text-[10.5px] text-[var(--ink3)] font-mono">
+                    In: {vehicle.entry_at ? formatDateTimeIST(vehicle.entry_at).split(" ")[1] : "Now"}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {vehicle.vehicle_photos && (
+                      <button
+                        type="button"
+                        onClick={() => setViewPhotosVehicle(vehicle)}
+                        className="w-8 h-8 rounded-full bg-[var(--soft)] hover:bg-[var(--soft2)] border border-[var(--line)] flex items-center justify-center text-[var(--ink2)] hover:text-[var(--ink)] transition-colors"
+                        title={t.activeVehicles.viewPhotos}
+                      >
+                        <CameraIcon className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => setViewPhotosVehicle(vehicle)}
-                      className="w-9 h-9 rounded-xl bg-muted/80 hover:bg-muted border border-border flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                      title="View Photos"
+                      onClick={() => handleInitiateExit(vehicle)}
+                      className="vx-btn accent !py-1.5 !px-3.5 text-xs font-bold"
                     >
-                      <CameraIcon className="w-4 h-4" />
+                      <span>{t.activeVehicles.checkOut}</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleInitiateExit(vehicle)}
-                    className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-primary to-orange-600 text-white font-bold text-xs shadow-md shadow-primary/20 hover:opacity-95 transition-all active:scale-95"
-                  >
-                    Check Out
-                  </button>
+                  </div>
                 </div>
               </div>
             );
@@ -281,20 +349,20 @@ export default function ActiveVehiclesPage() {
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowExitDialog(false)} />
           
-          <div className="relative w-full max-w-md bg-card border border-border rounded-t-[32px] sm:rounded-3xl shadow-2xl flex flex-col max-h-[90vh] z-10 overflow-hidden animate-in slide-in-from-bottom-6 duration-300">
+          <div className="relative w-full max-w-md bg-[var(--card)] border border-[var(--line)] rounded-t-[32px] sm:rounded-3xl shadow-2xl flex flex-col max-h-[90vh] z-10 overflow-hidden animate-in slide-in-from-bottom-6 duration-300">
             
             {/* Header */}
-            <div className="p-5 pb-3 border-b border-border/80 flex items-center justify-between shrink-0">
+            <div className="p-5 pb-3 border-b border-[var(--line)] flex items-center justify-between shrink-0">
               <div>
-                <h2 className="text-base font-black text-foreground">Vehicle Check-Out & Bill</h2>
-                <p className="text-xs font-mono font-bold text-primary mt-0.5">
+                <h2 className="text-base font-extrabold text-[var(--ink)]">{t.activeVehicles.vehicleCheckOutAndBill}</h2>
+                <p className="text-xs font-mono font-bold text-[var(--accent)] mt-0.5">
                   {selectedVehicle.vehicle_number}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowExitDialog(false)}
-                className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"
+                className="w-8 h-8 rounded-full bg-[var(--soft)] flex items-center justify-center text-[var(--ink3)] hover:text-[var(--ink)]"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -302,7 +370,7 @@ export default function ActiveVehiclesPage() {
 
             {exitMutation.isError && (
               <div className="p-3 mx-4 mt-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs font-bold">
-                {(exitMutation.error as any)?.message || "Failed to complete exit. Vehicle might have already been exited."}
+                {(exitMutation.error as any)?.message || t.gate.failedCreateEntry}
               </div>
             )}
 
@@ -310,88 +378,88 @@ export default function ActiveVehiclesPage() {
             <div className="p-4 space-y-4 overflow-y-auto pb-8">
               
               {/* Summary Card */}
-              <div className="bg-muted/40 border border-border rounded-2xl p-3.5 space-y-2 text-xs">
+              <div className="bg-[var(--soft)] border border-[var(--line)] rounded-2xl p-4 space-y-2 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Entry Time</span>
-                  <span className="font-semibold text-foreground">{formatDateTimeIST(selectedVehicle.entry_at)}</span>
+                  <span className="text-[var(--ink3)]">{t.activeVehicles.entryTimeLabel}</span>
+                  <span className="font-semibold text-[var(--ink)]">{formatDateTimeIST(selectedVehicle.entry_at)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Parked Duration</span>
-                  <span className="font-bold text-foreground">{humanizeDuration(billingResult.rawMinutes)}</span>
+                  <span className="text-[var(--ink3)]">{t.activeVehicles.parkedDuration}</span>
+                  <span className="font-bold text-[var(--ink)] font-mono">{humanizeDuration(billingResult.rawMinutes)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Rate Category</span>
-                  <span className="font-semibold text-foreground">
+                  <span className="text-[var(--ink3)]">{t.activeVehicles.rateCategory}</span>
+                  <span className="font-semibold text-[var(--ink)]">
                     {VEHICLE_TYPE_CONFIG[selectedVehicle.vehicle_type]?.label || selectedVehicle.vehicle_type}
                   </span>
                 </div>
-                <div className="flex justify-between pt-2 border-t border-border/80 text-sm font-bold">
-                  <span className="text-foreground">Total Billable Amount</span>
-                  <span className="text-lg font-black text-primary">{formatINR(billingResult.grossAmount)}</span>
+                <div className="flex justify-between pt-2.5 border-t border-[var(--line)] text-sm font-bold items-center">
+                  <span className="text-[var(--ink)]">{t.activeVehicles.totalBillableAmount}</span>
+                  <span className="text-2xl font-black text-[var(--accent)]">{formatINR(billingResult.grossAmount)}</span>
                 </div>
               </div>
 
               {/* Payment Mode Selector */}
               <div className="space-y-2">
-                <label className="text-xs font-bold text-foreground block">
-                  Select Payment Method *
+                <label className="text-xs font-bold text-[var(--ink)] block">
+                  {t.activeVehicles.selectPaymentMethodRequired}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setPaymentMethod("CASH")}
                     className={cn(
-                      "flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all gap-1 text-center",
+                      "flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all gap-1 text-center",
                       paymentMethod === "CASH"
                         ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold shadow-sm"
-                        : "border-border bg-muted/40 text-muted-foreground hover:text-foreground font-semibold"
+                        : "border-[var(--line)] bg-[var(--soft)] text-[var(--ink3)] hover:text-[var(--ink)] font-semibold"
                     )}
                   >
                     <Banknote className="w-5 h-5" />
-                    <span className="text-xs">Cash</span>
+                    <span className="text-xs">{t.activeVehicles.cashMode}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setPaymentMethod("UPI")}
                     className={cn(
-                      "flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all gap-1 text-center",
+                      "flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all gap-1 text-center",
                       paymentMethod === "UPI"
-                        ? "border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold shadow-sm"
-                        : "border-border bg-muted/40 text-muted-foreground hover:text-foreground font-semibold"
+                        ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-bold shadow-sm"
+                        : "border-[var(--line)] bg-[var(--soft)] text-[var(--ink3)] hover:text-[var(--ink)] font-semibold"
                     )}
                   >
                     <Smartphone className="w-5 h-5" />
-                    <span className="text-xs">UPI QR</span>
+                    <span className="text-xs">{t.activeVehicles.upiQrMode}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setPaymentMethod("CARD")}
                     className={cn(
-                      "flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all gap-1 text-center",
+                      "flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all gap-1 text-center",
                       paymentMethod === "CARD"
                         ? "border-purple-500 bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold shadow-sm"
-                        : "border-border bg-muted/40 text-muted-foreground hover:text-foreground font-semibold"
+                        : "border-[var(--line)] bg-[var(--soft)] text-[var(--ink3)] hover:text-[var(--ink)] font-semibold"
                     )}
                   >
                     <CreditCard className="w-5 h-5" />
-                    <span className="text-xs">Card / POS</span>
+                    <span className="text-xs">{t.activeVehicles.cardPosMode}</span>
                   </button>
                 </div>
               </div>
 
               {/* UPI Dynamic QR Code */}
               {paymentMethod === "UPI" && billingResult.grossAmount > 0 && (
-                <div className="bg-card border border-border rounded-2xl p-4 text-center space-y-2">
-                  <p className="text-xs font-bold text-foreground">Scan QR with any UPI App</p>
-                  <div className="inline-block p-3 bg-white rounded-xl shadow-sm border border-slate-100">
+                <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl p-4 text-center space-y-2">
+                  <p className="text-xs font-bold text-[var(--ink)]">{t.activeVehicles.scanUpiQr}</p>
+                  <div className="inline-block p-3.5 bg-white rounded-2xl shadow-sm border border-slate-100">
                     <QRCodeSVG
                       value={`upi://pay?pa=${UPI_CONFIG.vpa}&pn=${encodeURIComponent(UPI_CONFIG.payeeName)}&am=${(billingResult.grossAmount / 100).toFixed(2)}&cu=INR`}
                       size={150}
                     />
                   </div>
-                  <p className="text-[10px] text-muted-foreground font-mono">VPA: {UPI_CONFIG.vpa}</p>
+                  <p className="text-[10px] text-[var(--ink3)] font-mono">VPA: {UPI_CONFIG.vpa}</p>
                 </div>
               )}
 
@@ -406,9 +474,8 @@ export default function ActiveVehiclesPage() {
                     durationMinutes: billingResult.rawMinutes,
                   });
                 }}
-                className="w-full h-13 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-2xl font-black text-sm tracking-wide shadow-xl shadow-emerald-600/25 hover:opacity-95 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full vx-btn accent !py-3.5 !rounded-2xl text-xs font-bold shadow-lg"
               >
-
                 {exitMutation.isPending ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -417,40 +484,71 @@ export default function ActiveVehiclesPage() {
                 ) : (
                   <>
                     <Check className="w-4 h-4 stroke-[3]" />
-                    <span>Confirm Payment & Complete Exit</span>
+                    <span>Confirm Vehicle Exit</span>
                   </>
                 )}
               </button>
-
             </div>
-
           </div>
         </div>
       )}
 
       {/* ────────── PHOTO PREVIEW MODAL ────────── */}
       {viewPhotosVehicle && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-card border border-border rounded-3xl p-5 max-w-sm w-full space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="font-mono font-bold text-sm text-foreground">
-                {viewPhotosVehicle.vehicle_number} Photos
-              </h3>
-              <button onClick={() => setViewPhotosVehicle(null)} className="text-muted-foreground hover:text-foreground">
+        <div 
+          onClick={() => setViewPhotosVehicle(null)}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-3xl p-5 max-w-md w-full space-y-4 shadow-2xl"
+          >
+            <div className="flex justify-between items-center pb-2 border-b border-border/80">
+              <div>
+                <h3 className="font-mono font-black text-base text-primary">
+                  {viewPhotosVehicle.vehicle_number}
+                </h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {t.gate.timestamp}: {formatDateTimeIST(viewPhotosVehicle.entry_at)}
+                </p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setViewPhotosVehicle(null)} 
+                className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
               {viewPhotosVehicle.vehicle_photos?.front && (
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1 font-bold">Front View</p>
-                  <img src={viewPhotosVehicle.vehicle_photos.front} alt="Front" className="w-full h-28 object-cover rounded-xl border" />
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-foreground font-bold">{t.activeVehicles.frontView}</span>
+                    <span className="text-[10px] text-primary font-semibold">{t.activeVehicles.entryProof}</span>
+                  </div>
+                  <div className="rounded-2xl overflow-hidden border border-border bg-black/20 aspect-video flex items-center justify-center">
+                    <img 
+                      src={viewPhotosVehicle.vehicle_photos.front} 
+                      alt={t.activeVehicles.frontView} 
+                      className="w-full h-full object-contain" 
+                    />
+                  </div>
                 </div>
               )}
               {viewPhotosVehicle.vehicle_photos?.rear && (
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1 font-bold">Rear View</p>
-                  <img src={viewPhotosVehicle.vehicle_photos.rear} alt="Rear" className="w-full h-28 object-cover rounded-xl border" />
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-foreground font-bold">{t.activeVehicles.rearView}</span>
+                    <span className="text-[10px] text-primary font-semibold">{t.activeVehicles.entryProof}</span>
+                  </div>
+                  <div className="rounded-2xl overflow-hidden border border-border bg-black/20 aspect-video flex items-center justify-center">
+                    <img 
+                      src={viewPhotosVehicle.vehicle_photos.rear} 
+                      alt={t.activeVehicles.rearView} 
+                      className="w-full h-full object-contain" 
+                    />
+                  </div>
                 </div>
               )}
             </div>

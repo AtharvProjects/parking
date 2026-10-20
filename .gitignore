@@ -44,3 +44,20 @@ next-env.d.ts
 *.apk
 *.aab
 
+# iOS build & derived data
+ios/build/
+ios/DerivedData/
+ios/**/DerivedData/
+ios/**/xcuserdata/
+ios/**/Pods/
+ios/**/build/
+
+# Temporary screenshots & recordings
+*.png
+!public/**/*.png
+!android/**/*.png
+!ios/**/*.png
+*.jpg
+!public/**/*.jpg
+!android/**/*.jpg
+!ios/**/*.jpg

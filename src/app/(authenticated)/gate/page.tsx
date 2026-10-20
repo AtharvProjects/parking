@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/providers/auth-provider";
 import { useSite } from "@/providers/site-provider";
+import { useLanguage } from "@/providers/language-provider";
 import { sessionsService } from "@/services/sessions.service";
 import { VEHICLE_TYPE_CONFIG, VEHICLE_TYPES, BUSINESS_NAME } from "@/lib/constants";
 import type { VehicleType } from "@/lib/database.types";
@@ -13,12 +14,15 @@ import { generatePdfBill } from "@/lib/pdf-bill";
 import { formatDateTimeIST, formatDateIST, formatTimeIST } from "@/lib/formatters";
 import { sharePdfNative, downloadPdfNative } from "@/lib/native-share";
 import { Capacitor } from "@capacitor/core";
-import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
+import { captureOrPickImage, registerCameraRestoreListener } from "@/lib/image-utils";
+import { useBackHandler } from "@/providers/back-button-provider";
+import { openWhatsAppDirect } from "@/lib/whatsapp";
 import {
   Check,
   Loader2,
   Hash,
   Phone,
+  User,
   FileText,
   Printer,
   MessageCircle,
@@ -27,21 +31,78 @@ import {
   X,
   ArrowLeft,
   Building2,
-  ChevronDown
+  ChevronDown,
+  Image as ImageIcon,
+  Plus
 } from "lucide-react";
+
+const DRAFT_KEY = "swp_gate_entry_draft";
+
+function loadDraft() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function GateEntryPage() {
   const router = useRouter();
   const { employee } = useAuth();
   const { currentSite, currentSiteId, authorizedSites, switchSite } = useSite();
+  const { t, language } = useLanguage();
   const queryClient = useQueryClient();
 
+  const [initialLoaded, setInitialLoaded] = useState(false);
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [vehicleType, setVehicleType] = useState<VehicleType | null>(null);
   const [driverNumber, setDriverNumber] = useState("");
+  const [driverName, setDriverName] = useState("");
   const [notes, setNotes] = useState("");
   const [frontPhoto, setFrontPhoto] = useState<string | null>(null);
   const [rearPhoto, setRearPhoto] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState<'front' | 'rear' | null>(null);
+
+  // Restore draft state on initial mount (in case Android recreated Activity)
+  useEffect(() => {
+    const draft = loadDraft();
+    if (draft) {
+      if (draft.vehicleNumber) setVehicleNumber(draft.vehicleNumber);
+      if (draft.vehicleType) setVehicleType(draft.vehicleType);
+      if (draft.driverNumber) setDriverNumber(draft.driverNumber);
+      if (draft.driverName) setDriverName(draft.driverName);
+      if (draft.notes) setNotes(draft.notes);
+      if (draft.frontPhoto) setFrontPhoto(draft.frontPhoto);
+      if (draft.rearPhoto) setRearPhoto(draft.rearPhoto);
+    }
+    setInitialLoaded(true);
+
+    // Listen for restored camera result after Android Activity restart
+    registerCameraRestoreListener((slot, base64Data) => {
+      if (slot === "front") {
+        setFrontPhoto(base64Data);
+      } else {
+        setRearPhoto(base64Data);
+      }
+    });
+  }, []);
+
+  // Continuously save form state to draft storage
+  useEffect(() => {
+    if (!initialLoaded || typeof window === "undefined") return;
+    const draft = {
+      vehicleNumber,
+      vehicleType,
+      driverNumber,
+      driverName,
+      notes,
+      frontPhoto,
+      rearPhoto,
+    };
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  }, [vehicleNumber, vehicleType, driverNumber, driverName, notes, frontPhoto, rearPhoto, initialLoaded]);
 
   // Concrete active site ID for the entry transaction
   const effectiveSiteId = (currentSiteId && currentSiteId !== "ALL")
@@ -54,6 +115,9 @@ export default function GateEntryPage() {
     mutationFn: (data: Parameters<typeof sessionsService.createEntry>[0]) =>
       sessionsService.createEntry(data),
     onSuccess: () => {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(DRAFT_KEY);
+      }
       queryClient.invalidateQueries({ queryKey: ["active-vehicles"] });
       queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
@@ -65,17 +129,23 @@ export default function GateEntryPage() {
     setVehicleNumber("");
     setVehicleType(null);
     setDriverNumber("");
+    setDriverName("");
     setNotes("");
     setFrontPhoto(null);
     setRearPhoto(null);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(DRAFT_KEY);
+    }
     entryMutation.reset();
   }, [entryMutation]);
+
+  useBackHandler(entryMutation.isSuccess, resetForm, 10);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!vehicleType || !vehicleNumber.trim() || !employee) return;
     if (!effectiveSiteId) {
-      alert("Please select an active parking site first.");
+      alert(t("gate.selectActiveSite"));
       return;
     }
 
@@ -84,6 +154,7 @@ export default function GateEntryPage() {
       vehicle_number: vehicleNumber.trim().toUpperCase(),
       vehicle_type: vehicleType,
       driver_number: driverNumber.trim(),
+      driver_name: driverName.trim() || undefined,
       notes: notes.trim() || undefined,
       vehicle_photos: frontPhoto || rearPhoto ? { front: frontPhoto || undefined, rear: rearPhoto || undefined } : undefined,
       entry_operator_id: employee.id,
@@ -99,16 +170,17 @@ export default function GateEntryPage() {
         vehicleNumber: entryMutation.data.vehicle_number,
         vehicleType: entryMutation.data.vehicle_type,
         driverNumber: entryMutation.data.driver_number || "",
+        driverName: entryMutation.data.driver_name || "",
         entryAt: entryMutation.data.entry_at,
         entryOperatorName: employee?.name || "Gate Operator",
         site: activeSite,
       };
 
       if (Capacitor.isNativePlatform()) {
-        const base64 = await generatePdfBill(pdfData, "base64", "thermal", "entry");
+        const base64 = await generatePdfBill(pdfData, "base64", "thermal", "entry", language);
         await downloadPdfNative(base64 as string, filename);
       } else {
-        await generatePdfBill(pdfData, false, "thermal", "entry");
+        await generatePdfBill(pdfData, false, "thermal", "entry", language);
       }
     } catch (err) {
       console.error("Failed to generate entry bill:", err);
@@ -119,112 +191,118 @@ export default function GateEntryPage() {
     if (!entryMutation.data) return;
     const session = entryMutation.data;
     
-    if (!session.driver_number) {
-      alert("No driver phone number provided for this vehicle.");
-      return;
+    let targetPhone = session.driver_number?.trim() || driverNumber?.trim();
+    if (!targetPhone) {
+      const input = prompt(t("gate.enterDriverMobile"));
+      if (!input || !input.trim()) return;
+      targetPhone = input.trim();
     }
 
     try {
-      const filename = `entry-ticket-${session.vehicle_number}-${session.id.slice(-6)}.pdf`;
+      const filename = `entry-ticket-${session.vehicle_number.toUpperCase()}-${session.id.slice(-6)}.pdf`;
       const pdfData = {
         id: session.id,
         vehicleNumber: session.vehicle_number,
         vehicleType: session.vehicle_type,
-        driverNumber: session.driver_number,
+        driverNumber: targetPhone,
+        driverName: session.driver_name || (driverName ? driverName : ""),
         entryAt: session.entry_at,
         entryOperatorName: employee?.name || "Gate Operator",
         site: activeSite,
       };
 
       const brandName = activeSite?.brand_name || activeSite?.name || BUSINESS_NAME;
-      const text = `*${brandName}* - Parking Entry Slip\n\nDate: ${formatDateIST(session.entry_at)}\nTime: ${formatTimeIST(session.entry_at)}\nVehicle: ${session.vehicle_number}\nCategory: ${VEHICLE_TYPE_CONFIG[session.vehicle_type as keyof typeof VEHICLE_TYPE_CONFIG]?.label || session.vehicle_type}\nEntry Operator: ${employee?.name || "Staff"}\n\n*Please keep this message for checkout reference.*`;
+      const driverLine = session.driver_name ? `\n${t("whatsapp.driverLabel")}: ${session.driver_name}` : (driverName ? `\n${t("whatsapp.driverLabel")}: ${driverName}` : "");
+      const text = `*${brandName}* - ${t("whatsapp.entrySlipTitle")}\n\n${t("whatsapp.dateLabel")}: ${formatDateIST(session.entry_at)}\n${t("whatsapp.timeLabel")}: ${formatTimeIST(session.entry_at)}\n${t("whatsapp.vehicleLabel")}: ${session.vehicle_number}${driverLine}\n${t("whatsapp.categoryLabel")}: ${VEHICLE_TYPE_CONFIG[session.vehicle_type as keyof typeof VEHICLE_TYPE_CONFIG]?.label || session.vehicle_type}\n${t("whatsapp.entryOperatorLabel")}: ${employee?.name || t("common.staff")}\n\n*${t("whatsapp.keepForCheckout")}*`;
 
-      if (Capacitor.isNativePlatform()) {
-        const base64 = await generatePdfBill(pdfData, "base64", "thermal", "entry");
-        await sharePdfNative(base64 as string, filename, text);
-      } else {
-        await generatePdfBill(pdfData, false, "thermal", "entry");
-        window.open(`https://wa.me/91${session.driver_number}?text=${encodeURIComponent(text)}`, "_blank");
-      }
+      // Generate base64 PDF and send actual PDF document to WhatsApp
+      const base64 = await generatePdfBill(pdfData, "base64", "thermal", "entry", language);
+      await sharePdfNative(base64 as string, filename, text, targetPhone);
     } catch (err) {
-      console.error("Error sharing entry ticket:", err);
+      console.error("Error sharing PDF ticket on WhatsApp:", err);
+      alert(t("gate.couldNotGeneratePdf"));
     }
   };
 
-  const capturePhoto = async (type: 'front' | 'rear') => {
+  const handleCapturePhoto = async (e: React.MouseEvent, type: 'front' | 'rear', source: 'camera' | 'gallery' = 'camera') => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsCapturing(type);
     try {
-      const image = await Camera.getPhoto({
-        quality: 60,
-        allowEditing: false,
-        resultType: CameraResultType.Base64,
-        source: CameraSource.Camera,
-        width: 800,
-      });
-      
-      const base64Data = `data:image/${image.format};base64,${image.base64String}`;
-      if (type === 'front') {
-        setFrontPhoto(base64Data);
-      } else {
-        setRearPhoto(base64Data);
+      const base64Data = await captureOrPickImage(source, type);
+      if (base64Data) {
+        if (type === 'front') {
+          setFrontPhoto(base64Data);
+        } else {
+          setRearPhoto(base64Data);
+        }
       }
     } catch (error) {
-      console.log('User cancelled or error capturing photo:', error);
+      console.warn('Error capturing photo:', error);
+    } finally {
+      setIsCapturing(null);
     }
   };
 
   // Success state
   if (entryMutation.isSuccess && entryMutation.data) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[70vh] p-6 text-center max-w-md mx-auto">
-        <div className="w-20 h-20 rounded-full bg-emerald-50 dark:bg-emerald-950 flex items-center justify-center mb-5 animate-in zoom-in-75 duration-300">
-          <Check className="w-10 h-10 text-emerald-500" strokeWidth={3} />
+      <div className="flex flex-col items-center justify-center min-h-[70vh] p-6 text-center max-w-md mx-auto rv" style={{ ["--i" as any]: 0 }}>
+        <div className="w-20 h-20 rounded-full bg-[var(--green-soft)] flex items-center justify-center mb-5 animate-in zoom-in-75 duration-300">
+          <Check className="w-10 h-10 text-[var(--green)]" strokeWidth={3} />
         </div>
-        <h2 className="text-2xl font-black text-foreground mb-1">Vehicle Checked In!</h2>
-        <p className="text-sm font-mono font-bold text-primary mb-1">
+        <h2 className="text-2xl font-black text-[var(--ink)] mb-1">{t("gate.vehicleCheckedIn")}</h2>
+        <p className="text-sm font-mono font-bold text-[var(--accent)] mb-1">
           {entryMutation.data.vehicle_number} ({VEHICLE_TYPE_CONFIG[entryMutation.data.vehicle_type as keyof typeof VEHICLE_TYPE_CONFIG]?.label})
         </p>
-        <p className="text-xs text-muted-foreground mb-1">
-          Site: <span className="font-semibold text-foreground">{activeSite?.name || "Main Site"}</span>
+        {entryMutation.data.driver_name && (
+          <p className="text-xs text-[var(--ink)] font-semibold mb-1">
+            {t("gate.driver")}: <span className="text-[var(--accent)] font-bold">{entryMutation.data.driver_name}</span>
+          </p>
+        )}
+        <p className="text-xs text-[var(--ink3)] mb-1">
+          {t("common.site")}: <span className="font-semibold text-[var(--ink)]">{activeSite?.name || t("gate.mainSite")}</span>
         </p>
-        <p className="text-xs text-muted-foreground mb-6">
-          Timestamp: <span className="font-semibold text-foreground">{formatDateTimeIST(entryMutation.data.entry_at)}</span>
+        <p className="text-xs text-[var(--ink3)] mb-6">
+          {t("gate.timestamp")}: <span className="font-semibold text-[var(--ink)]">{formatDateTimeIST(entryMutation.data.entry_at)}</span>
         </p>
         
         <div className="w-full space-y-2.5">
           <button
             type="button"
             onClick={handlePrintEntryTicket}
-            className="w-full border-2 border-primary text-primary bg-primary/5 px-6 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-primary/10 transition-all active:scale-95 shadow-sm"
+            className="w-full vx-btn soft !py-3.5 !rounded-2xl text-xs font-bold"
           >
             <Download className="w-4 h-4" />
-            Download Thermal Ticket
+            <span>{t("gate.downloadThermalTicket")}</span>
           </button>
 
           {entryMutation.data.driver_number && (
             <button
               type="button"
               onClick={handleShareWhatsApp}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-[#25D366] text-white text-xs font-bold shadow-md hover:opacity-95 transition-opacity active:scale-95"
+              className="w-full vx-btn !bg-[#25D366] !text-white !py-3.5 !rounded-2xl text-xs font-bold shadow-md hover:opacity-95"
             >
               <MessageCircle className="w-4 h-4" />
-              Share Ticket on WhatsApp
+              <span>{t("gate.shareTicketWhatsApp")}</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={resetForm}
-            className="w-full bg-primary text-white py-3 rounded-2xl text-xs font-bold shadow-lg shadow-primary/25 hover:opacity-95 transition-all active:scale-95"
+            className="w-full vx-btn accent !py-3.5 !rounded-2xl text-xs font-bold shadow-lg"
           >
-            Register Next Vehicle
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>{t("gate.registerNextVehicle")}</span>
           </button>
 
           <button
             type="button"
-            onClick={() => router.push("/dashboard")}
-            className="w-full py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => router.push("/dashboard/")}
+            className="w-full py-2.5 text-xs font-semibold text-[var(--ink3)] hover:text-[var(--ink)] transition-colors"
           >
-            Back to Dashboard
+            {t("gate.backToDashboard")}
           </button>
         </div>
       </div>
@@ -235,171 +313,255 @@ export default function GateEntryPage() {
     <div className="p-4 md:p-6 pb-36 max-w-xl mx-auto space-y-5 font-sans">
       
       {/* ────────── TOP BAR WITH BACK BUTTON & SITE INFO ────────── */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between rv" style={{ ["--i" as any]: 0 }}>
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => router.push("/dashboard")}
-            className="w-9 h-9 rounded-full bg-muted/80 hover:bg-muted border border-border flex items-center justify-center text-foreground transition-colors active:scale-95"
+            onClick={() => router.push("/dashboard/")}
+            className="w-10 h-10 rounded-full bg-[var(--soft)] hover:bg-[var(--soft2)] border border-[var(--line)] flex items-center justify-center text-[var(--ink)] transition-colors active:scale-95"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-foreground tracking-tight">New Vehicle Entry</h1>
-            <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
-              <Building2 className="w-3 h-3 text-primary" />
-              <span>Location: <strong>{activeSite?.name || "Main Site"}</strong></span>
-            </p>
+            <h1 className="text-xl sm:text-3xl font-extrabold text-[var(--ink)] tracking-tight">{t("gate.newVehicleEntry")}</h1>
+            <div className="flex items-center gap-1.5 text-xs text-[var(--ink3)] font-medium mt-0.5">
+              <Building2 className="w-3.5 h-3.5 text-[var(--accent)]" />
+              <span>{t("gate.location")}: <strong className="text-[var(--ink)]">{activeSite?.name || t("gate.mainSite")}</strong></span>
+            </div>
           </div>
         </div>
       </div>
 
-      {entryMutation.isError && (
-        <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs font-bold">
-          {(entryMutation.error as any)?.message || "Failed to register vehicle entry. Please check details and retry."}
-        </div>
-      )}
-
+      {/* ────────── ENTRY FORM ────────── */}
       <form onSubmit={handleSubmit} className="space-y-4">
         
-        {/* Vehicle Number */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm space-y-1.5">
-          <label className="text-xs font-bold text-foreground block">
-            Vehicle Registration Number *
+        {/* Error message */}
+        {entryMutation.isError && (
+          <div className="p-3.5 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-xs font-semibold">
+            {(entryMutation.error as Error)?.message || t("gate.failedCreateEntry")}
+          </div>
+        )}
+
+        {/* Vehicle Registration Number */}
+        <div className="vx-card p-4 space-y-2 rv" style={{ ["--i" as any]: 1 }}>
+          <label className="text-xs font-bold text-[var(--ink)] block">
+            {t("gate.vehicleRegNumber")} <span className="text-destructive">*</span>
           </label>
           <div className="relative">
-            <Hash className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--ink3)]">
+              <Hash className="w-4 h-4" />
+            </div>
             <input
               type="text"
+              required
+              autoFocus
               value={vehicleNumber}
               onChange={(e) => setVehicleNumber(e.target.value.toUpperCase())}
-              placeholder="e.g. MH 23 AE 3029"
-              className="w-full h-12 pl-10 pr-4 rounded-xl border border-input bg-background text-sm font-mono font-bold focus:outline-none focus:border-primary uppercase tracking-wider text-foreground placeholder:text-muted-foreground/60"
-              autoComplete="off"
-              autoFocus
-              required
+              placeholder={t("gate.vehicleRegPlaceholder")}
+              className="w-full h-12 pl-10 pr-4 rounded-xl border border-[var(--line)] bg-[var(--soft)] font-mono text-base font-bold text-[var(--ink)] tracking-wider uppercase placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 transition-all"
             />
           </div>
         </div>
 
-        {/* Vehicle Type */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm space-y-2.5">
-          <label className="text-xs font-bold text-foreground block">
-            Select Vehicle Category *
+        {/* Vehicle Category Selector */}
+        <div className="vx-card p-4 space-y-2.5 rv" style={{ ["--i" as any]: 2 }}>
+          <label className="text-xs font-bold text-[var(--ink)] block">
+            {t("gate.selectVehicleCategory")} <span className="text-destructive">*</span>
           </label>
           <div className="grid grid-cols-3 gap-2.5">
             {VEHICLE_TYPES.map((type) => {
-              const config = VEHICLE_TYPE_CONFIG[type];
-              const selected = vehicleType === type;
+              const cfg = VEHICLE_TYPE_CONFIG[type];
+              const isSelected = vehicleType === type;
               return (
                 <button
                   key={type}
                   type="button"
                   onClick={() => setVehicleType(type)}
                   className={cn(
-                    "flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all text-center",
-                    selected
-                      ? "border-primary bg-primary/10 text-primary font-bold shadow-sm"
-                      : "border-border/80 bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground font-semibold"
+                    "flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all active:scale-95 text-center min-h-[96px]",
+                    isSelected
+                      ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] shadow-sm ring-1 ring-[var(--accent)]"
+                      : "border-[var(--line)] bg-[var(--soft)] hover:bg-[var(--soft2)] text-[var(--ink)]"
                   )}
                 >
-                  <span className="text-2xl mb-1">{config.icon}</span>
-                  <span className="text-xs">{config.label}</span>
+                  <span className="text-2xl mb-1.5">{cfg.icon}</span>
+                  <span className="text-xs font-bold leading-tight">{cfg.label}</span>
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* Driver Contact Number */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm space-y-1.5">
-          <label className="text-xs font-bold text-foreground block">
-            Driver Phone Number (Optional)
-          </label>
+        {/* Driver Name */}
+        <div className="vx-card p-4 space-y-2 rv" style={{ ["--i" as any]: 3 }}>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-[var(--ink)] block">
+              {t("gate.driverName")} ({t("common.optional")})
+            </label>
+            <span className="text-[10px] text-[var(--ink3)] font-medium">{t("gate.forSlipsRecords")}</span>
+          </div>
           <div className="relative">
-            <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--ink3)]">
+              <User className="w-4 h-4" />
+            </div>
             <input
-              type="tel"
-              value={driverNumber}
-              onChange={(e) => setDriverNumber(e.target.value)}
-              placeholder="10-digit Mobile for WhatsApp Ticket"
-              className="w-full h-12 pl-10 pr-4 rounded-xl border border-input bg-background text-sm font-mono focus:outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/60"
-              autoComplete="off"
-              maxLength={10}
+              type="text"
+              value={driverName}
+              onChange={(e) => setDriverName(e.target.value)}
+              placeholder={t("gate.driverNamePlaceholder")}
+              className="w-full h-12 pl-10 pr-4 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-sm font-semibold text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 transition-all"
             />
           </div>
         </div>
 
-        {/* Notes / Remarks */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm space-y-1.5">
-          <label className="text-xs font-bold text-foreground block">
-            Notes / Parking Bay (Optional)
+        {/* Driver Phone Number */}
+        <div className="vx-card p-4 space-y-2 rv" style={{ ["--i" as any]: 4 }}>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-[var(--ink)] block">
+              {t("gate.driverPhone")} ({t("common.optional")})
+            </label>
+            <span className="text-[10px] text-[var(--ink3)] font-medium">{t("gate.forWhatsAppTicket")}</span>
+          </div>
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--ink3)]">
+              <Phone className="w-4 h-4" />
+            </div>
+            <input
+              type="tel"
+              maxLength={10}
+              value={driverNumber}
+              onChange={(e) => setDriverNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
+              placeholder={t("gate.driverPhonePlaceholder")}
+              className="w-full h-12 pl-10 pr-4 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-sm font-semibold text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 transition-all font-mono"
+            />
+          </div>
+        </div>
+
+        {/* Parking Notes / Bay Assignment */}
+        <div className="vx-card p-4 space-y-2 rv" style={{ ["--i" as any]: 5 }}>
+          <label className="text-xs font-bold text-[var(--ink)] block">
+            {t("gate.notesBay")} ({t("common.optional")})
           </label>
           <div className="relative">
-            <FileText className="absolute left-3.5 top-3.5 w-4 h-4 text-muted-foreground" />
+            <div className="absolute top-3 left-3.5 pointer-events-none text-[var(--ink3)]">
+              <FileText className="w-4 h-4" />
+            </div>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Slot B-12, Transport trailer..."
+              placeholder={t("gate.notesPlaceholder")}
               rows={2}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-input bg-background text-xs focus:outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/60 resize-none"
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-xs focus:outline-none focus:border-[var(--accent)] text-[var(--ink)] placeholder:text-[var(--ink3)] resize-none"
             />
           </div>
         </div>
 
         {/* Vehicle Photo Capture */}
-        <div className="bg-card border border-border/80 rounded-2xl p-4 shadow-sm space-y-2.5">
-          <label className="text-xs font-bold text-foreground block">
-            Vehicle Photos (Optional)
-          </label>
+        <div className="vx-card p-4 space-y-2.5 rv" style={{ ["--i" as any]: 6 }}>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-[var(--ink)] block">
+              {t("gate.vehiclePhotos")} ({t("common.optional")})
+            </label>
+            <span className="text-[10px] text-[var(--ink3)] font-medium">{t("gate.syncedAcrossDevices")}</span>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             {/* Front Photo */}
-            <div>
+            <div className="space-y-1">
               {frontPhoto ? (
-                <div className="relative rounded-xl overflow-hidden border border-border aspect-video">
+                <div className="relative rounded-2xl overflow-hidden border border-[var(--line)] aspect-video shadow-inner">
                   <img src={frontPhoto} alt="Front" className="w-full h-full object-cover" />
                   <button
                     type="button"
-                    onClick={() => setFrontPhoto(null)}
-                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/70 text-white flex items-center justify-center"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setFrontPhoto(null);
+                    }}
+                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/75 text-white flex items-center justify-center hover:bg-black transition-colors"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => capturePhoto('front')}
-                  className="w-full aspect-video rounded-xl border border-dashed border-border bg-muted/30 hover:bg-muted/60 flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <CameraIcon className="w-5 h-5" />
-                  <span className="text-[11px] font-semibold">Front View</span>
-                </button>
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    disabled={isCapturing !== null}
+                    onClick={(e) => handleCapturePhoto(e, 'front', 'camera')}
+                    className="w-full aspect-video rounded-2xl border border-dashed border-[var(--line)] bg-[var(--soft)] hover:bg-[var(--soft2)] flex flex-col items-center justify-center gap-1.5 text-[var(--ink3)] hover:text-[var(--ink)] transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isCapturing === 'front' ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin text-[var(--accent)]" />
+                        <span className="text-[10px] font-bold text-[var(--accent)]">Capturing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CameraIcon className="w-5 h-5 text-[var(--accent)]" />
+                        <span className="text-[11px] font-bold">{t("gate.takeFrontPhoto")}</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isCapturing !== null}
+                    onClick={(e) => handleCapturePhoto(e, 'front', 'gallery')}
+                    className="text-[10px] text-[var(--ink3)] hover:text-[var(--accent)] font-semibold flex items-center justify-center gap-1 py-1"
+                  >
+                    <ImageIcon className="w-3 h-3" />
+                    <span>Choose from Gallery</span>
+                  </button>
+                </div>
               )}
             </div>
 
             {/* Rear Photo */}
-            <div>
+            <div className="space-y-1">
               {rearPhoto ? (
-                <div className="relative rounded-xl overflow-hidden border border-border aspect-video">
+                <div className="relative rounded-2xl overflow-hidden border border-[var(--line)] aspect-video shadow-inner">
                   <img src={rearPhoto} alt="Rear" className="w-full h-full object-cover" />
                   <button
                     type="button"
-                    onClick={() => setRearPhoto(null)}
-                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/70 text-white flex items-center justify-center"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setRearPhoto(null);
+                    }}
+                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/75 text-white flex items-center justify-center hover:bg-black transition-colors"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => capturePhoto('rear')}
-                  className="w-full aspect-video rounded-xl border border-dashed border-border bg-muted/30 hover:bg-muted/60 flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <CameraIcon className="w-5 h-5" />
-                  <span className="text-[11px] font-semibold">Rear View</span>
-                </button>
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    disabled={isCapturing !== null}
+                    onClick={(e) => handleCapturePhoto(e, 'rear', 'camera')}
+                    className="w-full aspect-video rounded-2xl border border-dashed border-[var(--line)] bg-[var(--soft)] hover:bg-[var(--soft2)] flex flex-col items-center justify-center gap-1.5 text-[var(--ink3)] hover:text-[var(--ink)] transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isCapturing === 'rear' ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin text-[var(--accent)]" />
+                        <span className="text-[10px] font-bold text-[var(--accent)]">Capturing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CameraIcon className="w-5 h-5 text-[var(--accent)]" />
+                        <span className="text-[11px] font-bold">{t("gate.takeRearPhoto")}</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isCapturing !== null}
+                    onClick={(e) => handleCapturePhoto(e, 'rear', 'gallery')}
+                    className="text-[10px] text-[var(--ink3)] hover:text-[var(--accent)] font-semibold flex items-center justify-center gap-1 py-1"
+                  >
+                    <ImageIcon className="w-3 h-3" />
+                    <span>Choose from Gallery</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -409,17 +571,17 @@ export default function GateEntryPage() {
         <button
           type="submit"
           disabled={!vehicleNumber.trim() || !vehicleType || entryMutation.isPending}
-          className="w-full h-14 bg-gradient-to-r from-primary via-orange-600 to-amber-600 text-white rounded-2xl font-black text-sm tracking-wide shadow-xl shadow-primary/25 hover:opacity-95 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full vx-btn accent !py-4 !rounded-2xl text-sm font-extrabold shadow-xl disabled:opacity-50"
         >
           {entryMutation.isPending ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              <span>Saving Entry...</span>
+              <span>{t("gate.savingEntry")}</span>
             </>
           ) : (
             <>
-              <Check className="w-5 h-5" />
-              <span>Generate Entry Slip</span>
+              <Check className="w-5 h-5 stroke-[3]" />
+              <span>{t("gate.generateEntrySlip")}</span>
             </>
           )}
         </button>

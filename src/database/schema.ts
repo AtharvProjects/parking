@@ -58,6 +58,10 @@ export const initializeLocalSchema = async () => {
       avatar_url TEXT,
       shift TEXT,
       salary_advance INTEGER NOT NULL DEFAULT 0,
+      base_salary INTEGER NOT NULL DEFAULT 0,
+      salary_type TEXT NOT NULL DEFAULT 'MONTHLY',
+      designation TEXT,
+      joining_date TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT,
@@ -88,6 +92,7 @@ export const initializeLocalSchema = async () => {
       vehicle_number TEXT NOT NULL,
       vehicle_type TEXT NOT NULL,
       driver_number TEXT NOT NULL,
+      driver_name TEXT,
       notes TEXT,
       vehicle_photos TEXT,
       entry_at TEXT NOT NULL,
@@ -121,6 +126,46 @@ export const initializeLocalSchema = async () => {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(session_id) REFERENCES parking_sessions(id)
     );
+
+    CREATE TABLE IF NOT EXISTS staff_attendance (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      site_id TEXT NOT NULL,
+      employee_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      status TEXT NOT NULL,
+      check_in TEXT,
+      check_out TEXT,
+      shift TEXT,
+      notes TEXT,
+      marked_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(company_id) REFERENCES companies(id),
+      FOREIGN KEY(site_id) REFERENCES sites(id),
+      FOREIGN KEY(employee_id) REFERENCES employees(id),
+      UNIQUE(employee_id, date)
+    );
+
+    CREATE TABLE IF NOT EXISTS staff_transactions (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      site_id TEXT,
+      employee_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      payment_date TEXT NOT NULL,
+      payment_method TEXT NOT NULL DEFAULT 'CASH',
+      month TEXT,
+      notes TEXT,
+      transaction_ref TEXT,
+      recorded_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(company_id) REFERENCES companies(id),
+      FOREIGN KEY(employee_id) REFERENCES employees(id)
+    );
+
     CREATE TABLE IF NOT EXISTS _schema_version (
       version INTEGER PRIMARY KEY
     );
@@ -169,9 +214,52 @@ export const initializeLocalSchema = async () => {
       'CREATE INDEX IF NOT EXISTS idx_employee_sites_site ON employee_sites(site_id);',
       'CREATE INDEX IF NOT EXISTS idx_sessions_site_status ON parking_sessions(site_id, status);',
       'CREATE INDEX IF NOT EXISTS idx_sessions_vehicle_search ON parking_sessions(vehicle_number);'
+    ],
+    4: [
+      'ALTER TABLE parking_sessions ADD COLUMN driver_name TEXT;',
+      'ALTER TABLE employees ADD COLUMN base_salary INTEGER NOT NULL DEFAULT 0;',
+      'ALTER TABLE employees ADD COLUMN salary_type TEXT NOT NULL DEFAULT "MONTHLY";',
+      'ALTER TABLE employees ADD COLUMN designation TEXT;',
+      'ALTER TABLE employees ADD COLUMN joining_date TEXT;',
+      `CREATE TABLE IF NOT EXISTS staff_attendance (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        site_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        date TEXT NOT NULL,
+        status TEXT NOT NULL,
+        check_in TEXT,
+        check_out TEXT,
+        shift TEXT,
+        notes TEXT,
+        marked_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(employee_id, date)
+      );`,
+      `CREATE TABLE IF NOT EXISTS staff_transactions (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        site_id TEXT,
+        employee_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        payment_date TEXT NOT NULL,
+        payment_method TEXT NOT NULL DEFAULT "CASH",
+        month TEXT,
+        notes TEXT,
+        transaction_ref TEXT,
+        recorded_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );`,
+      'CREATE INDEX IF NOT EXISTS idx_staff_attendance_emp_date ON staff_attendance(employee_id, date);',
+      'CREATE INDEX IF NOT EXISTS idx_staff_attendance_date ON staff_attendance(date);',
+      'CREATE INDEX IF NOT EXISTS idx_staff_tx_emp ON staff_transactions(employee_id, payment_date);',
+      'CREATE INDEX IF NOT EXISTS idx_staff_tx_month ON staff_transactions(month);',
+      'CREATE INDEX IF NOT EXISTS idx_sessions_driver_name ON parking_sessions(driver_name);'
     ]
   };
-
 
   const targetVersion = Math.max(...Object.keys(migrations).map(Number));
 

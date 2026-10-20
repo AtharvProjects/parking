@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/providers/auth-provider";
 import { authService } from "@/services/auth.service";
+import { useLanguage } from "@/providers/language-provider";
+import { LANGUAGES } from "@/lib/i18n";
 import {
   Car,
   KeyRound,
@@ -23,7 +25,8 @@ import {
   Building2,
   Clock,
   Sparkles,
-  UserCheck
+  UserCheck,
+  Globe
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -33,6 +36,8 @@ type AuthTab = "pin" | "password";
 export default function LoginPage() {
   const router = useRouter();
   const { status, employee, loginWithPassword, loginWithPin, resetPassword, isOffline } = useAuth();
+  const { t, language, setLanguage } = useLanguage();
+  const [showLangMenu, setShowLangMenu] = useState(false);
 
   // Tab State: 'pin' (Fast Staff PIN) or 'password' (Admin/Manager)
   const [activeTab, setActiveTab] = useState<AuthTab>("pin");
@@ -66,9 +71,9 @@ export default function LoginPage() {
   useEffect(() => {
     if (status === "authenticated" && employee) {
       if (employee.role === "OPERATOR" || employee.role === "GATE_ATTENDANT") {
-        router.push("/gate");
+        router.push("/gate/");
       } else {
-        router.push("/dashboard");
+        router.push("/dashboard/");
       }
     }
   }, [status, employee, router]);
@@ -119,12 +124,12 @@ export default function LoginPage() {
   const submitPinAuth = async (ident = mobileIdentifier, pinCode = pin) => {
     setError("");
     if (!ident.trim()) {
-      setError("Please enter your registered 10-digit mobile number.");
+      setError(t("login.errorMobile"));
       setShakeKey((k) => k + 1);
       return;
     }
     if (!pinCode || pinCode.length < 4) {
-      setError("Please enter your 4-digit Security PIN.");
+      setError(t("login.errorPin"));
       setShakeKey((k) => k + 1);
       return;
     }
@@ -133,12 +138,12 @@ export default function LoginPage() {
     try {
       const emp = await loginWithPin({ identifier: ident.trim(), pin: pinCode.trim() });
       if (emp.role === "OPERATOR" || emp.role === "GATE_ATTENDANT") {
-        router.push("/gate");
+        router.push("/gate/");
       } else {
-        router.push("/dashboard");
+        router.push("/dashboard/");
       }
     } catch (err: any) {
-      setError(err.message || "Invalid Mobile Number or Security PIN.");
+      setError(err.message || t("login.errorInvalidCredentials"));
       setShakeKey((k) => k + 1);
       setPin("");
     } finally {
@@ -152,13 +157,13 @@ export default function LoginPage() {
     setError("");
 
     if (!email.trim() || !password.trim()) {
-      setError("Please fill in both email and password.");
+      setError(t("login.errorEmailPassword"));
       setShakeKey((k) => k + 1);
       return;
     }
 
     if (isSignUp && password !== confirmPassword) {
-      setError("Passwords do not match.");
+      setError(t("login.errorPasswordMismatch"));
       setShakeKey((k) => k + 1);
       return;
     }
@@ -167,14 +172,14 @@ export default function LoginPage() {
     try {
       if (isSignUp) {
         await authService.signUp(email, password);
-        setError("Account created! Please check your email to confirm registration or sign in.");
+        setError(t("login.accountCreated"));
         setIsSignUp(false);
       } else {
         await loginWithPassword({ email: email.trim(), password: password.trim() });
-        router.push("/dashboard");
+        router.push("/dashboard/");
       }
     } catch (err: any) {
-      setError(err.message || "Authentication failed. Check your credentials.");
+      setError(err.message || t("login.errorAuthFailed"));
       setShakeKey((k) => k + 1);
     } finally {
       setIsLoading(false);
@@ -195,7 +200,7 @@ export default function LoginPage() {
       await resetPassword(forgotEmail.trim());
       setForgotSent(true);
     } catch (err: any) {
-      setForgotError(err.message || "Failed to send reset link. Please verify the email.");
+      setForgotError(err.message || t("login.errorResetFailed"));
     } finally {
       setForgotLoading(false);
     }
@@ -217,49 +222,80 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-[100dvh] flex flex-col bg-slate-950 text-slate-100 font-sans selection:bg-primary selection:text-white">
+    <div className="min-h-[100dvh] flex flex-col bg-[var(--page)] text-[var(--ink)] font-sans selection:bg-[var(--accent)] selection:text-white">
       {/* Dynamic Ambient Background Layer */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-gradient-to-b from-primary/25 via-primary/5 to-transparent rounded-full blur-3xl opacity-80" />
-        <div className="absolute bottom-0 right-0 w-[400px] h-[400px] bg-sky-600/10 rounded-full blur-3xl" />
-        {/* Subtle grid pattern overlay */}
-        <div 
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: `radial-gradient(#ffffff 1px, transparent 1px)`,
-            backgroundSize: '24px 24px'
-          }}
-        />
+        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-gradient-to-b from-[var(--accent)]/15 via-[var(--accent)]/5 to-transparent rounded-full blur-3xl opacity-80" />
       </div>
 
+      {/* Status Bar Spacer */}
+      <div 
+        className="w-full shrink-0 relative z-10" 
+        style={{ height: "max(env(safe-area-inset-top, 0px), 54px)" }} 
+      />
+
       {/* Top Header Bar */}
-      <header className="relative z-10 pt-8 pb-4 px-6 flex items-center justify-between max-w-lg mx-auto w-full">
+      <header className="relative z-10 py-4 px-6 flex items-center justify-between max-w-lg mx-auto w-full rv" style={{ ["--i" as any]: 0 }}>
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary to-orange-600 p-[1px] shadow-lg shadow-primary/25 flex items-center justify-center">
-            <div className="w-full h-full bg-slate-900 rounded-2xl flex items-center justify-center">
-              <Car className="w-6 h-6 text-primary" strokeWidth={2.5} />
-            </div>
+          <div className="vx-logo-badge !w-10 !h-10 text-base font-extrabold">
+            V
           </div>
           <div>
-            <h2 className="text-white font-bold text-[17px] tracking-tight leading-none">
-              Sant Wamanbhau Parking
+            <h2 className="text-[var(--ink)] font-extrabold text-[17px] tracking-tight leading-none">
+              Vertix <span className="text-[var(--accent)]">Parking</span>
             </h2>
-            <p className="text-[12px] text-slate-400 font-medium mt-1">Smart Facility & Gate Terminal</p>
+            <p className="text-[11px] text-[var(--ink3)] font-medium mt-1">{t("login.subtitle")}</p>
           </div>
         </div>
 
         {/* Network & Offline Status Indicator */}
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/90 border border-slate-800 backdrop-blur-md text-[11px] font-semibold">
+        <div className="pill flex items-center gap-1.5 px-3 py-1 bg-[var(--card)] text-[11px] font-semibold">
           {isOffline ? (
             <>
-              <WifiOff className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-              <span className="text-amber-300">Offline (PIN Auth)</span>
+              <WifiOff className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+              <span className="text-amber-600 dark:text-amber-400">{t("login.offlinePinAuth")}</span>
             </>
           ) : (
             <>
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-emerald-400">Live Sync</span>
+              <span className="text-emerald-600 dark:text-emerald-400">{t("common.livesync")}</span>
             </>
+          )}
+        </div>
+
+        {/* Language Selector Globe */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowLangMenu(!showLangMenu)}
+            className="pill flex items-center gap-1.5 px-3 py-1 bg-[var(--card)] text-[11px] font-semibold text-[var(--ink2)] hover:text-[var(--ink)] transition-colors"
+          >
+            <Globe className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span>{LANGUAGES.find(l => l.code === language)?.nativeLabel}</span>
+          </button>
+          {showLangMenu && (
+            <div className="absolute right-0 top-full mt-2 w-40 bg-[var(--card)] border border-[var(--line)] rounded-2xl shadow-2xl overflow-hidden z-50 p-1">
+              {LANGUAGES.map((lang) => (
+                <button
+                  key={lang.code}
+                  type="button"
+                  onClick={() => {
+                    setLanguage(lang.code);
+                    setShowLangMenu(false);
+                  }}
+                  className={cn(
+                    "w-full px-3 py-2 rounded-xl text-left text-xs font-bold flex items-center gap-3 transition-colors",
+                    language === lang.code
+                      ? "bg-[var(--accent)] text-white font-bold"
+                      : "text-[var(--ink2)] hover:bg-[var(--soft)] hover:text-[var(--ink)]"
+                  )}
+                >
+                  <span className="text-base">{lang.flag}</span>
+                  <span>{lang.nativeLabel}</span>
+                  {language === lang.code && <Check className="w-3.5 h-3.5 ml-auto" />}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </header>
@@ -267,21 +303,21 @@ export default function LoginPage() {
       {/* Main Form Container */}
       <main className="relative z-10 flex-1 flex flex-col justify-center max-w-md mx-auto w-full px-5 py-4">
         {/* Welcome Text */}
-        <div className="text-center mb-6">
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            {activeTab === "pin" ? "Staff Gate Login" : isSignUp ? "Create Admin Account" : "Management Portal"}
+        <div className="text-center mb-6 rv" style={{ ["--i" as any]: 1 }}>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-[var(--ink)] tracking-tight">
+            {activeTab === "pin" ? t("login.staffGateLogin") : isSignUp ? t("login.createAdminAccount") : t("login.managementPortal")}
           </h1>
-          <p className="text-slate-400 text-sm mt-1.5 px-4">
+          <p className="text-[var(--ink3)] text-xs sm:text-sm mt-1.5 px-4 font-medium">
             {activeTab === "pin"
-              ? "Fast 4-digit PIN access for on-duty operators & attendants."
+              ? t("login.pinDescription")
               : isSignUp
-              ? "Register a new parking business organization."
-              : "Sign in with your email to manage sites, rates, & revenue."}
+              ? t("login.signUpDescription")
+              : t("login.passwordDescription")}
           </p>
         </div>
 
         {/* Dual Mode Switcher Tabs */}
-        <div className="bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 backdrop-blur-xl mb-6 shadow-inner flex">
+        <div className="pill p-1.5 bg-[var(--soft)] mb-6 flex rv" style={{ ["--i" as any]: 2 }}>
           <button
             type="button"
             onClick={() => {
@@ -289,14 +325,14 @@ export default function LoginPage() {
               setError("");
             }}
             className={cn(
-              "flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-200",
+              "flex-1 py-2.5 rounded-full font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all duration-200",
               activeTab === "pin"
-                ? "bg-gradient-to-r from-primary to-orange-600 text-white shadow-md shadow-primary/20"
-                : "text-slate-400 hover:text-white"
+                ? "bg-[var(--btn)] text-[var(--on-ink)] shadow-md"
+                : "text-[var(--ink3)] hover:text-[var(--ink)]"
             )}
           >
-            <KeyRound className="w-4 h-4" />
-            Quick Staff PIN
+            <KeyRound className="w-4 h-4 text-[var(--accent)]" />
+            <span>{t("login.quickStaffPin")}</span>
           </button>
           <button
             type="button"
@@ -305,23 +341,24 @@ export default function LoginPage() {
               setError("");
             }}
             className={cn(
-              "flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-200",
+              "flex-1 py-2.5 rounded-full font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all duration-200",
               activeTab === "password"
-                ? "bg-slate-800 text-white shadow-sm border border-slate-700/60"
-                : "text-slate-400 hover:text-white"
+                ? "bg-[var(--btn)] text-[var(--on-ink)] shadow-md"
+                : "text-[var(--ink3)] hover:text-[var(--ink)]"
             )}
           >
-            <ShieldCheck className="w-4 h-4" />
-            Admin / Manager
+            <ShieldCheck className="w-4 h-4 text-[var(--accent)]" />
+            <span>{t("login.adminManager")}</span>
           </button>
         </div>
 
-        {/* Glass Card */}
+        {/* Vertix Card Container */}
         <motion.div
           key={shakeKey}
           animate={{ x: shakeKey ? [-8, 8, -6, 6, -3, 3, 0] : 0 }}
           transition={{ duration: 0.4 }}
-          className="bg-slate-900/90 rounded-[28px] border border-slate-800/90 backdrop-blur-2xl p-6 shadow-2xl relative overflow-hidden"
+          className="vx-card p-6 shadow-xl relative overflow-hidden rv"
+          style={{ ["--i" as any]: 3 }}
         >
           {/* Error Banner */}
           <AnimatePresence>
@@ -330,14 +367,14 @@ export default function LoginPage() {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="mb-5 p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-3 text-red-400 text-sm font-medium leading-snug"
+                className="mb-5 p-3.5 rounded-2xl bg-destructive/10 border border-destructive/20 flex items-start gap-3 text-destructive text-xs font-semibold leading-snug"
               >
-                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <div className="flex-1">{error}</div>
                 <button
                   type="button"
                   onClick={() => setError("")}
-                  className="p-0.5 text-red-400 hover:text-white"
+                  className="p-0.5 text-destructive hover:opacity-80"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -345,14 +382,15 @@ export default function LoginPage() {
             )}
           </AnimatePresence>
 
+
           {/* ────────── TAB 1: QUICK STAFF PIN MODE ────────── */}
           {activeTab === "pin" && (
             <div className="space-y-5">
               {/* Quick Staff Selection Chips (if available) */}
               {quickStaff.length > 0 && (
                 <div>
-                  <label className="text-[12px] uppercase tracking-wider font-bold text-slate-400 mb-2 block">
-                    Quick Staff Select
+                  <label className="text-[11px] uppercase tracking-wider font-bold text-[var(--ink3)] mb-2 block">
+                    {t("login.quickStaffSelect")}
                   </label>
                   <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar -mx-1 px-1">
                     {quickStaff.slice(0, 4).map((member) => {
@@ -363,13 +401,13 @@ export default function LoginPage() {
                           type="button"
                           onClick={() => handleSelectStaff(member)}
                           className={cn(
-                            "px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 shrink-0 border transition-all",
+                            "px-3 py-2 rounded-full text-xs font-semibold flex items-center gap-2 shrink-0 border transition-all",
                             isSelected
-                              ? "bg-primary/20 border-primary text-white ring-1 ring-primary"
-                              : "bg-slate-800/80 border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:text-white"
+                              ? "bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] font-bold shadow-sm"
+                              : "bg-[var(--soft)] border-[var(--line)] text-[var(--ink2)] hover:bg-[var(--soft2)] hover:text-[var(--ink)]"
                           )}
                         >
-                          <div className="w-5 h-5 rounded-full bg-primary/30 flex items-center justify-center text-[10px] font-bold text-primary">
+                          <div className="w-5 h-5 rounded-full bg-[var(--accent)] text-white flex items-center justify-center text-[10px] font-bold">
                             {member.name.charAt(0).toUpperCase()}
                           </div>
                           <span>{member.name}</span>
@@ -382,23 +420,23 @@ export default function LoginPage() {
 
               {/* Mobile Number Input */}
               <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 block">
-                  Registered Mobile / Staff ID
+                <label className="text-xs font-bold uppercase tracking-wider text-[var(--ink3)] mb-2 block">
+                  {t("login.registeredMobile")}
                 </label>
                 <div className="relative">
-                  <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                  <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--ink3)]" />
                   <input
                     type="tel"
                     value={mobileIdentifier}
                     onChange={(e) => setMobileIdentifier(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                    placeholder="Enter 10-digit mobile number"
-                    className="w-full h-13 pl-12 pr-4 rounded-xl bg-slate-950/80 border border-slate-800 text-white font-mono text-base tracking-wider placeholder:text-slate-600 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    placeholder={t("login.enterMobile")}
+                    className="w-full h-12 pl-11 pr-4 rounded-xl bg-[var(--soft)] border border-[var(--line)] text-[var(--ink)] font-mono text-base tracking-wider placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)] transition-all"
                   />
                   {mobileIdentifier && (
                     <button
                       type="button"
                       onClick={() => setMobileIdentifier("")}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--ink3)] hover:text-[var(--ink)]"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -409,22 +447,22 @@ export default function LoginPage() {
               {/* Visual Masked PIN Display */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Security PIN (4–6 Digits)
+                  <label className="text-xs font-bold uppercase tracking-wider text-[var(--ink3)]">
+                    {t("login.securityPin")}
                   </label>
                   {pin.length > 0 && (
                     <button
                       type="button"
                       onClick={() => setPin("")}
-                      className="text-xs text-primary font-semibold hover:underline"
+                      className="text-xs text-[var(--accent)] font-semibold hover:underline"
                     >
-                      Clear PIN
+                      {t("login.clearPin")}
                     </button>
                   )}
                 </div>
 
-                {/* 4 to 6 PIN Dots */}
-                <div className="flex justify-center gap-3 py-2.5 px-4 rounded-2xl bg-slate-950/80 border border-slate-800">
+                {/* 4 PIN Dots */}
+                <div className="flex justify-center gap-3 py-3 px-4 rounded-2xl bg-[var(--soft)] border border-[var(--line)]">
                   {[0, 1, 2, 3].map((idx) => {
                     const isFilled = pin.length > idx;
                     return (
@@ -433,8 +471,8 @@ export default function LoginPage() {
                         className={cn(
                           "w-4 h-4 rounded-full transition-all duration-200",
                           isFilled
-                            ? "bg-gradient-to-br from-primary to-orange-500 scale-110 shadow-md shadow-primary/40 ring-2 ring-primary/40"
-                            : "bg-slate-800 border border-slate-700"
+                            ? "bg-[var(--accent)] scale-110 shadow-md shadow-[var(--accent)]/40 ring-2 ring-[var(--accent)]/30"
+                            : "bg-[var(--card)] border border-[var(--line)]"
                         )}
                       />
                     );
@@ -443,7 +481,7 @@ export default function LoginPage() {
               </div>
 
               {/* Touch Numpad for Mobile POS / Tablets */}
-              <div className="grid grid-cols-3 gap-2.5 pt-1">
+              <div className="grid grid-cols-3 gap-2 pt-1">
                 {["1", "2", "3", "4", "5", "6", "7", "8", "9", "CLEAR", "0", "BACKSPACE"].map((val) => {
                   if (val === "CLEAR") {
                     return (
@@ -451,7 +489,7 @@ export default function LoginPage() {
                         key={val}
                         type="button"
                         onClick={() => handleKeypadPress("CLEAR")}
-                        className="h-12 rounded-xl bg-slate-800/40 hover:bg-slate-800 text-slate-400 text-xs font-bold active:scale-95 transition-all border border-slate-800/60 flex items-center justify-center"
+                        className="h-11 rounded-xl bg-[var(--soft)] hover:bg-[var(--soft2)] text-[var(--ink3)] text-xs font-bold active:scale-95 transition-all border border-[var(--line)] flex items-center justify-center"
                       >
                         C
                       </button>
@@ -463,7 +501,7 @@ export default function LoginPage() {
                         key={val}
                         type="button"
                         onClick={() => handleKeypadPress("BACKSPACE")}
-                        className="h-12 rounded-xl bg-slate-800/40 hover:bg-slate-800 text-slate-300 text-sm font-bold active:scale-95 transition-all border border-slate-800/60 flex items-center justify-center"
+                        className="h-11 rounded-xl bg-[var(--soft)] hover:bg-[var(--soft2)] text-[var(--ink2)] text-sm font-bold active:scale-95 transition-all border border-[var(--line)] flex items-center justify-center"
                       >
                         ⌫
                       </button>
@@ -474,7 +512,7 @@ export default function LoginPage() {
                       key={val}
                       type="button"
                       onClick={() => handleKeypadPress(val)}
-                      className="h-12 rounded-xl bg-slate-800/90 hover:bg-slate-700/80 text-white font-mono text-lg font-semibold active:scale-95 transition-all border border-slate-700/60 shadow-sm"
+                      className="h-11 rounded-xl bg-[var(--card)] hover:bg-[var(--soft)] text-[var(--ink)] font-mono text-base font-bold active:scale-95 transition-all border border-[var(--line)] shadow-sm"
                     >
                       {val}
                     </button>
@@ -487,14 +525,14 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => submitPinAuth()}
                 disabled={isLoading || !mobileIdentifier.trim() || pin.length < 4}
-                className="w-full h-14 rounded-2xl bg-gradient-to-r from-primary to-orange-600 text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-primary/30 hover:opacity-95 disabled:opacity-50 active:scale-[0.99] transition-all"
+                className="w-full vx-btn accent !py-3.5 !rounded-2xl text-sm font-bold shadow-lg disabled:opacity-50"
               >
                 {isLoading ? (
                   <RefreshCw className="w-5 h-5 animate-spin" />
                 ) : (
                   <>
-                    <span>Enter Gate Terminal</span>
-                    <ArrowRight className="w-5 h-5" />
+                    <span>{t("login.enterGateTerminal")}</span>
+                    <ArrowRight className="w-4 h-4" />
                   </>
                 )}
               </button>
@@ -506,43 +544,43 @@ export default function LoginPage() {
             <form onSubmit={submitPasswordAuth} className="space-y-4">
               {/* Email */}
               <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 block">
-                  Admin Email Address
+                <label className="text-xs font-bold uppercase tracking-wider text-[var(--ink3)] mb-2 block">
+                  {t("login.adminEmail")}
                 </label>
                 <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--ink3)]" />
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="admin@parking.com"
                     required
-                    className="w-full h-13 pl-12 pr-4 rounded-xl bg-slate-950/80 border border-slate-800 text-white text-base placeholder:text-slate-600 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    className="w-full h-12 pl-11 pr-4 rounded-xl bg-[var(--soft)] border border-[var(--line)] text-[var(--ink)] text-sm placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)] transition-all"
                   />
                 </div>
               </div>
 
               {/* Password */}
               <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 block">
-                  Password
+                <label className="text-xs font-bold uppercase tracking-wider text-[var(--ink3)] mb-2 block">
+                  {t("common.password")}
                 </label>
                 <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--ink3)]" />
                   <input
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     required
-                    className="w-full h-13 pl-12 pr-12 rounded-xl bg-slate-950/80 border border-slate-800 text-white text-base placeholder:text-slate-600 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    className="w-full h-12 pl-11 pr-11 rounded-xl bg-[var(--soft)] border border-[var(--line)] text-[var(--ink)] text-sm placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)] transition-all"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-1"
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--ink3)] hover:text-[var(--ink)] p-1"
                   >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
@@ -550,18 +588,18 @@ export default function LoginPage() {
               {/* Confirm Password (if Sign Up) */}
               {isSignUp && (
                 <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 block">
-                    Confirm Password
+                  <label className="text-xs font-bold uppercase tracking-wider text-[var(--ink3)] mb-2 block">
+                    {t("login.confirmPassword")}
                   </label>
                   <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--ink3)]" />
                     <input
                       type={showPassword ? "text" : "password"}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="••••••••"
                       required
-                      className="w-full h-13 pl-12 pr-4 rounded-xl bg-slate-950/80 border border-slate-800 text-white text-base placeholder:text-slate-600 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                      className="w-full h-12 pl-11 pr-4 rounded-xl bg-[var(--soft)] border border-[var(--line)] text-[var(--ink)] text-sm placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)] transition-all"
                     />
                   </div>
                 </div>
@@ -573,16 +611,16 @@ export default function LoginPage() {
                   <label className="flex items-center gap-2.5 cursor-pointer select-none">
                     <div
                       className={cn(
-                        "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
+                        "w-4 h-4 rounded-md border flex items-center justify-center transition-colors",
                         rememberMe
-                          ? "bg-primary border-primary text-white"
-                          : "bg-slate-950 border-slate-700"
+                          ? "bg-[var(--accent)] border-[var(--accent)] text-white"
+                          : "bg-[var(--soft)] border-[var(--line)]"
                       )}
                       onClick={() => setRememberMe(!rememberMe)}
                     >
-                      {rememberMe && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      {rememberMe && <Check className="w-3 h-3 stroke-[3]" />}
                     </div>
-                    <span className="text-xs text-slate-300 font-medium">Remember session</span>
+                    <span className="text-xs text-[var(--ink2)] font-medium">{t("login.rememberSession")}</span>
                   </label>
                   <button
                     type="button"
@@ -592,9 +630,9 @@ export default function LoginPage() {
                       setForgotSent(false);
                       setForgotError("");
                     }}
-                    className="text-xs text-primary font-bold hover:underline"
+                    className="text-xs text-[var(--accent)] font-semibold hover:underline"
                   >
-                    Forgot password?
+                    {t("login.forgotPassword")}
                   </button>
                 </div>
               )}
@@ -603,32 +641,32 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full h-14 rounded-2xl bg-gradient-to-r from-primary to-orange-600 text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-primary/30 hover:opacity-95 disabled:opacity-50 active:scale-[0.99] transition-all mt-4"
+                className="w-full vx-btn accent !py-3.5 !rounded-2xl text-sm font-bold shadow-lg shadow-[var(--accent)]/20 disabled:opacity-50 mt-2"
               >
                 {isLoading ? (
                   <RefreshCw className="w-5 h-5 animate-spin" />
                 ) : (
                   <>
-                    <span>{isSignUp ? "Create Admin Account" : "Sign In to Dashboard"}</span>
-                    <ArrowRight className="w-5 h-5" />
+                    <span>{isSignUp ? t("login.createAdminAccount") : t("login.signInToDashboard")}</span>
+                    <ArrowRight className="w-4 h-4" />
                   </>
                 )}
               </button>
 
               {/* Toggle Sign In / Sign Up */}
-              <div className="text-center pt-3">
+              <div className="text-center pt-2">
                 <button
                   type="button"
                   onClick={() => {
                     setIsSignUp(!isSignUp);
                     setError("");
                   }}
-                  className="text-xs text-slate-400 hover:text-white transition-colors"
+                  className="text-xs text-[var(--ink3)] hover:text-[var(--ink)] transition-colors"
                 >
                   {isSignUp ? (
-                    <span>Already have an account? <strong className="text-primary">Sign In</strong></span>
+                    <span>{t("login.alreadyHaveAccount")} <strong className="text-[var(--accent)]">{t("login.signIn")}</strong></span>
                   ) : (
-                    <span>Need to register a new facility? <strong className="text-primary">Sign Up</strong></span>
+                    <span>{t("login.needToRegister")} <strong className="text-[var(--accent)]">{t("login.signUp")}</strong></span>
                   )}
                 </button>
               </div>
@@ -637,25 +675,25 @@ export default function LoginPage() {
         </motion.div>
 
         {/* Quick Demo Credentials Footer */}
-        <div className="mt-6 flex flex-col items-center gap-2.5 text-center">
-          <span className="text-[11px] font-bold tracking-wider uppercase text-slate-500">
-            Developer / Tester Quick-Fill
+        <div className="mt-6 flex flex-col items-center gap-2 text-center rv" style={{ ["--i" as any]: 4 }}>
+          <span className="text-[10px] font-bold tracking-wider uppercase text-[var(--ink3)]">
+            {t("login.devQuickFill")}
           </span>
           <div className="flex flex-wrap gap-2 justify-center">
             <button
               type="button"
               onClick={fillDemoAdmin}
-              className="px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-[11px] font-semibold text-slate-400 hover:text-white hover:border-slate-700 transition-all flex items-center gap-1.5"
+              className="pill px-3 py-1.5 bg-[var(--soft)] border border-[var(--line)] text-[11px] font-semibold text-[var(--ink2)] hover:text-[var(--ink)] transition-all flex items-center gap-1.5"
             >
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
               <span>Admin (admin@gmail.com)</span>
             </button>
             <button
               type="button"
               onClick={fillDemoOperator}
-              className="px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-[11px] font-semibold text-slate-400 hover:text-white hover:border-slate-700 transition-all flex items-center gap-1.5"
+              className="pill px-3 py-1.5 bg-[var(--soft)] border border-[var(--line)] text-[11px] font-semibold text-[var(--ink2)] hover:text-[var(--ink)] transition-all flex items-center gap-1.5"
             >
-              <KeyRound className="w-3.5 h-3.5 text-primary" />
+              <KeyRound className="w-3.5 h-3.5 text-[var(--accent)]" />
               <span>Operator PIN (9420500321 / 1234)</span>
             </button>
           </div>
@@ -671,61 +709,61 @@ export default function LoginPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowForgotModal(false)}
-              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             />
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl z-10"
+              className="relative w-full max-w-md vx-card p-6 shadow-2xl z-10 border border-[var(--line)]"
             >
               <button
                 type="button"
                 onClick={() => setShowForgotModal(false)}
-                className="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                className="absolute top-5 right-5 w-8 h-8 rounded-full bg-[var(--soft)] flex items-center justify-center text-[var(--ink3)] hover:text-[var(--ink)] transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
 
               <div className="mb-5">
-                <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-3">
-                  <Mail className="w-6 h-6" />
+                <div className="w-11 h-11 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center mb-3">
+                  <Mail className="w-5 h-5" />
                 </div>
-                <h3 className="text-xl font-bold text-white">Reset Password</h3>
-                <p className="text-sm text-slate-400 mt-1">
-                  Enter your admin email and we’ll send you a link to reset your account password.
+                <h3 className="text-lg font-bold text-[var(--ink)]">{t("login.resetPassword")}</h3>
+                <p className="text-xs text-[var(--ink3)] mt-1">
+                  {t("login.resetPasswordDesc")}
                 </p>
               </div>
 
               {forgotSent ? (
-                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-center space-y-3">
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
-                    <Check className="w-5 h-5" />
+                <div className="p-4 rounded-2xl bg-[var(--green-soft)] border border-[var(--green)]/30 text-center space-y-3">
+                  <div className="w-9 h-9 rounded-full bg-[var(--green)]/20 text-[var(--green)] flex items-center justify-center mx-auto">
+                    <Check className="w-4 h-4" />
                   </div>
-                  <p className="text-sm font-semibold text-emerald-300">
-                    Reset link sent to <strong>{forgotEmail}</strong>!
+                  <p className="text-xs font-semibold text-[var(--green)]">
+                    {t("login.resetLinkSent")} <strong>{forgotEmail}</strong>!
                   </p>
-                  <p className="text-xs text-slate-400">
-                    Please check your inbox (and spam folder) and follow the instructions to set a new password.
+                  <p className="text-[11px] text-[var(--ink3)]">
+                    {t("login.checkInbox")}
                   </p>
                   <button
                     type="button"
                     onClick={() => setShowForgotModal(false)}
-                    className="w-full py-2.5 rounded-xl bg-slate-800 text-white text-xs font-bold hover:bg-slate-700 transition-colors"
+                    className="w-full py-2.5 rounded-full bg-[var(--btn)] text-[var(--on-ink)] text-xs font-semibold transition-colors"
                   >
-                    Back to Sign In
+                    {t("login.backToSignIn")}
                   </button>
                 </div>
               ) : (
                 <form onSubmit={handleForgotSubmit} className="space-y-4">
                   {forgotError && (
-                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 font-medium">
+                    <div className="p-3 rounded-xl bg-[var(--red-soft)] border border-[var(--red)]/30 text-xs text-[var(--red)] font-medium">
                       {forgotError}
                     </div>
                   )}
                   <div>
-                    <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 block">
-                      Email Address
+                    <label className="text-xs font-bold uppercase tracking-wider text-[var(--ink3)] mb-2 block">
+                      {t("login.emailAddress")}
                     </label>
                     <input
                       type="email"
@@ -733,15 +771,15 @@ export default function LoginPage() {
                       onChange={(e) => setForgotEmail(e.target.value)}
                       placeholder="admin@parking.com"
                       required
-                      className="w-full h-12 px-4 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:outline-none focus:border-primary"
+                      className="w-full h-11 px-4 rounded-xl bg-[var(--soft)] border border-[var(--line)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]"
                     />
                   </div>
                   <button
                     type="submit"
                     disabled={forgotLoading}
-                    className="w-full h-12 rounded-xl bg-primary text-white font-bold text-sm flex items-center justify-center gap-2 hover:bg-primary/90 disabled:opacity-50 transition-all"
+                    className="w-full vx-btn accent !py-3 !rounded-xl text-xs font-bold"
                   >
-                    {forgotLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Send Reset Link"}
+                    {forgotLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : t("login.sendResetLink")}
                   </button>
                 </form>
               )}
