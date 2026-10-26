@@ -50,8 +50,7 @@ const DESKTOP_NAV_ITEMS: NavItemConfig[] = [
   { href: "/dashboard/", icon: LayoutGrid, labelKey: "nav.activity" },
   { href: "/gate/active/", icon: Car, labelKey: "nav.vehicles", requiredFeature: "VEHICLES" },
   { href: "/reports/", icon: BarChart3, labelKey: "nav.analytics", requiredFeature: "REPORTS" },
-  { href: "/search/", icon: Search, labelKey: "nav.parking", requiredFeature: "SEARCH" },
-  { href: "/employees/", icon: Users, labelKey: "dashboard.staffPayroll", requiredFeature: "EMPLOYEES" },
+  { href: "/employees/", icon: Users, labelKey: "settings.users", requiredFeature: "EMPLOYEES" },
   { href: "/settings/", icon: Settings, labelKey: "settings.title", requiredFeature: "SETTINGS" },
 ];
 
@@ -70,22 +69,6 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useBackHandler(isMoreMenuOpen, () => setIsMoreMenuOpen(false), 30);
-
-  // Nav indicator tracking
-  const navContainerRef = useRef<HTMLDivElement>(null);
-  const railContainerRef = useRef<HTMLDivElement>(null);
-  const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; top: number; width: number; height: number; opacity: number }>({
-    left: 0,
-    top: 0,
-    width: 0,
-    height: 0,
-    opacity: 0,
-  });
-  const [railIndicatorStyle, setRailIndicatorStyle] = useState<{ top: number; height: number; opacity: number }>({
-    top: 0,
-    height: 40,
-    opacity: 0,
-  });
 
   const visibleNavItems = DESKTOP_NAV_ITEMS.filter(
     (item) => !item.requiredFeature || hasPermission(employee?.role, item.requiredFeature)
@@ -125,74 +108,12 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
 
   const activeNavHref = getActiveNavItemHref();
 
-  // Update sliding indicator for Top Nav
-  useEffect(() => {
-    const updateIndicator = () => {
-      if (!navContainerRef.current) return;
-      const targetHref = getActiveNavItemHref();
-      if (!targetHref) {
-        setIndicatorStyle((prev) => ({ ...prev, opacity: 0 }));
-        return;
-      }
-      
-      const activeBtn = navContainerRef.current.querySelector<HTMLAnchorElement>(`a[data-href="${targetHref}"]`);
-
-      if (activeBtn) {
-        setIndicatorStyle({
-          left: (activeBtn as HTMLElement).offsetLeft,
-          top: (activeBtn as HTMLElement).offsetTop,
-          width: (activeBtn as HTMLElement).offsetWidth,
-          height: (activeBtn as HTMLElement).offsetHeight,
-          opacity: 1,
-        });
-      } else {
-        setIndicatorStyle((prev) => ({ ...prev, opacity: 0 }));
-      }
-    };
-
-    updateIndicator();
-    window.addEventListener("resize", updateIndicator);
-    const timeout = setTimeout(updateIndicator, 50);
-    return () => {
-      window.removeEventListener("resize", updateIndicator);
-      clearTimeout(timeout);
-    };
-  }, [pathname, visibleNavItems.length]);
-
-  // Update vertical sliding indicator for Rail
-  useEffect(() => {
-    const updateRailIndicator = () => {
-      if (!railContainerRef.current) return;
-      const targetHref = getActiveNavItemHref();
-      if (!targetHref) {
-        setRailIndicatorStyle((prev) => ({ ...prev, opacity: 0 }));
-        return;
-      }
-
-      const activeBtn = railContainerRef.current.querySelector<HTMLAnchorElement>(`a[data-href="${targetHref}"]`);
-
-      if (activeBtn) {
-        setRailIndicatorStyle({
-          top: (activeBtn as HTMLElement).offsetTop,
-          height: (activeBtn as HTMLElement).offsetHeight,
-          opacity: 1,
-        });
-      } else {
-        setRailIndicatorStyle((prev) => ({ ...prev, opacity: 0 }));
-      }
-    };
-
-    updateRailIndicator();
-    const timeout = setTimeout(updateRailIndicator, 50);
-    return () => clearTimeout(timeout);
-  }, [pathname, visibleNavItems.length]);
-
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
   };
 
-  if (status === "loading") {
+  if (status === "loading" && !employee) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-[var(--page)]">
         <div className="flex flex-col items-center gap-4">
@@ -208,7 +129,7 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
   return (
     <div className="vx-page-wrapper">
       <div className="vx-frame">
-        {/* ────────── VERTIX TOP PILL HEADER (MATCHING REFERENCE) ────────── */}
+        {/* ────────── VERTIX TOP HEADER (CLEAN ACTION BAR) ────────── */}
         <header className="hidden md:flex items-center justify-between gap-3 relative z-30 pb-4 w-full">
           {/* Brand Logo */}
           <Link href="/dashboard/" className="flex items-center gap-2.5 shrink-0 select-none group" style={{ ["--i" as any]: 0 }}>
@@ -221,54 +142,103 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
             </div>
           </Link>
 
-          {/* Desktop Nav Pills with Sliding Capsule Indicator */}
-          <nav
-            ref={navContainerRef}
-            className="pill vx-nav rv shrink-0 !bg-white dark:!bg-zinc-900 !p-1.5 !border-slate-200/80 dark:!border-zinc-800 shadow-sm"
-            style={{ ["--i" as any]: 1 }}
+          {/* Quick Search Bar in Center (Desktop) */}
+          <div
+            onClick={() => router.push("/search/")}
+            className="hidden lg:flex items-center gap-2.5 px-4 py-2 rounded-full bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 text-xs text-slate-400 hover:text-slate-700 hover:border-slate-300 transition-all cursor-pointer shadow-xs max-w-sm w-full mx-4"
           >
-            {/* Smooth animated sliding capsule indicator */}
-            <span
-              className="ind !bg-[#141416]"
-              style={{
-                left: `${indicatorStyle.left}px`,
-                top: `${indicatorStyle.top}px`,
-                width: `${indicatorStyle.width}px`,
-                height: `${indicatorStyle.height}px`,
-                opacity: indicatorStyle.opacity,
-              }}
-            />
-            {visibleNavItems.map((item) => {
-              const isActive = activeNavHref === item.href;
+            <Search className="w-4 h-4 text-[#f25c27]" />
+            <span className="font-medium truncate">{t("search.searchDetailedPlaceholder") || "Search plate or phone..."}</span>
+          </div>
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  data-href={item.href}
-                  className={cn(
-                    "px-3.5 py-1.5 text-xs font-semibold flex items-center gap-1.5 transition-colors text-slate-600 hover:text-slate-900 dark:text-zinc-400",
-                    isActive && "on !text-white font-bold"
-                  )}
-                  title={t(item.labelKey)}
-                >
-                  <item.icon className="w-3.5 h-3.5 shrink-0" />
-                  <span>{t(item.labelKey)}</span>
-                </Link>
-              );
-            })}
-          </nav>
+          {/* Right Action Controls: Search Icon (iPad/tablet), Site Switcher, Language Switcher, Theme Toggle, Operator Profile */}
+          <div className="flex items-center gap-2.5 shrink-0" style={{ ["--i" as any]: 1 }}>
+            {/* Search Icon for iPad / narrow desktop */}
+            <button
+              type="button"
+              onClick={() => router.push("/search/")}
+              className="lg:hidden pill w-9 h-9 rounded-full flex items-center justify-center text-slate-600 dark:text-zinc-300 hover:text-slate-900 bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 shadow-sm transition-transform active:scale-95"
+              title="Search Vehicle"
+            >
+              <Search className="w-4 h-4 text-[#f25c27]" />
+            </button>
 
-          {/* Right Site Selector Pill */}
-          <div className="flex items-center gap-2.5 shrink-0" style={{ ["--i" as any]: 2 }}>
+            {/* Active Site Selector Button */}
             <button
               type="button"
               onClick={() => setIsSiteModalOpen(true)}
               className="pill flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 hover:bg-slate-50 border border-slate-200/80 dark:border-zinc-800 shadow-sm transition-all active:scale-95 shrink-0"
             >
               <Building2 className="w-4 h-4 text-[#f25c27] shrink-0" />
-              <span className="truncate max-w-[140px] font-bold text-slate-800 dark:text-zinc-200">{siteDisplayName}</span>
+              <span className="truncate max-w-[150px] font-bold text-slate-800 dark:text-zinc-200">{siteDisplayName}</span>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            </button>
+
+            {/* Quick Language Dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowLangMenu((prev) => !prev)}
+                className="pill flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 hover:bg-slate-50 border border-slate-200/80 dark:border-zinc-800 shadow-sm transition-all active:scale-95"
+                title="Change Language"
+              >
+                <Globe className="w-3.5 h-3.5 text-[#f25c27]" />
+                <span>{LANGUAGES.find((l) => l.code === language)?.nativeLabel || "मराठी"}</span>
+                <ChevronDown className="w-3 h-3 text-slate-400" />
+              </button>
+
+              {showLangMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowLangMenu(false)} />
+                  <div className="absolute right-0 top-full mt-2 w-36 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-slate-200 dark:border-zinc-800 py-1.5 z-50 overflow-hidden text-xs font-semibold animate-in fade-in zoom-in-95 duration-150">
+                    {LANGUAGES.map((l) => (
+                      <button
+                        key={l.code}
+                        type="button"
+                        onClick={() => {
+                          setLanguage(l.code);
+                          setShowLangMenu(false);
+                        }}
+                        className={cn(
+                          "w-full text-left px-3.5 py-2 flex items-center justify-between hover:bg-orange-50 dark:hover:bg-zinc-800 hover:text-[#f25c27] transition-colors",
+                          language === l.code ? "bg-orange-50 dark:bg-zinc-800 text-[#f25c27] font-bold" : "text-slate-700 dark:text-zinc-300"
+                        )}
+                      >
+                        <span>{l.flag} {l.nativeLabel}</span>
+                        {language === l.code && <span className="text-xs">✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Theme Toggle */}
+            <button
+              type="button"
+              onClick={(e) => toggle(e)}
+              className="pill w-9 h-9 rounded-full flex items-center justify-center text-slate-600 dark:text-zinc-300 hover:text-slate-900 bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 shadow-sm transition-transform active:scale-95"
+              title="Toggle Theme"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
+            </button>
+
+            {/* Operator Profile Avatar */}
+            <button
+              type="button"
+              onClick={() => setIsSwitchModalOpen(true)}
+              className="relative flex items-center gap-2 p-1 pr-3 rounded-full border border-slate-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm hover:border-slate-300 transition-all active:scale-95"
+              title="Switch Operator"
+            >
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#f25c27] to-[#e64a19] text-white flex items-center justify-center text-xs font-black shadow-xs">
+                {employee?.name?.charAt(0).toUpperCase() || "O"}
+              </div>
+              <div className="text-left hidden xl:block">
+                <p className="text-[11px] font-bold text-slate-800 dark:text-zinc-200 leading-tight truncate max-w-[90px]">
+                  {employee?.name || "Operator"}
+                </p>
+              </div>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-zinc-900 shrink-0" />
             </button>
           </div>
         </header>
@@ -334,130 +304,39 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
           <aside className="hidden md:flex flex-col items-center justify-between bg-white dark:bg-zinc-900 rounded-3xl p-2.5 lg:p-3 border border-slate-200/80 dark:border-zinc-800 shadow-sm w-[76px] lg:w-[84px] shrink-0 min-h-[85vh] py-6 sticky top-4 select-none">
             {/* Top Navigation Items */}
             <div className="flex flex-col items-center gap-5 w-full">
-              {/* Dashboard */}
-              <Link
-                href="/dashboard/"
-                className="flex flex-col items-center gap-1.5 group w-full"
-              >
-                <div
-                  className={cn(
-                    "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
-                    activeNavHref === "/dashboard/"
-                      ? "bg-gradient-to-br from-[#f25c27] to-[#e64a19] text-white shadow-md shadow-orange-500/30 scale-105"
-                      : "text-slate-400 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-zinc-800"
-                  )}
-                >
-                  <LayoutGrid className="w-5 h-5" />
-                </div>
-                <span
-                  className={cn(
-                    "text-[10px] tracking-tight leading-none transition-colors",
-                    activeNavHref === "/dashboard/" ? "font-bold text-slate-900 dark:text-white" : "font-medium text-slate-500 group-hover:text-slate-800"
-                  )}
-                >
-                  Dashboard
-                </span>
-              </Link>
-
-              {/* Vehicles */}
-              <Link
-                href="/gate/active/"
-                className="flex flex-col items-center gap-1.5 group w-full"
-              >
-                <div
-                  className={cn(
-                    "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
-                    activeNavHref === "/gate/active/"
-                      ? "bg-gradient-to-br from-[#f25c27] to-[#e64a19] text-white shadow-md shadow-orange-500/30 scale-105"
-                      : "text-slate-400 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-zinc-800"
-                  )}
-                >
-                  <Car className="w-5 h-5" />
-                </div>
-                <span
-                  className={cn(
-                    "text-[10px] tracking-tight leading-none transition-colors",
-                    activeNavHref === "/gate/active/" ? "font-bold text-slate-900 dark:text-white" : "font-medium text-slate-500 group-hover:text-slate-800"
-                  )}
-                >
-                  Vehicles
-                </span>
-              </Link>
-
-              {/* Reports */}
-              <Link
-                href="/reports/"
-                className="flex flex-col items-center gap-1.5 group w-full"
-              >
-                <div
-                  className={cn(
-                    "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
-                    activeNavHref === "/reports/"
-                      ? "bg-gradient-to-br from-[#f25c27] to-[#e64a19] text-white shadow-md shadow-orange-500/30 scale-105"
-                      : "text-slate-400 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-zinc-800"
-                  )}
-                >
-                  <BarChart3 className="w-5 h-5" />
-                </div>
-                <span
-                  className={cn(
-                    "text-[10px] tracking-tight leading-none transition-colors",
-                    activeNavHref === "/reports/" ? "font-bold text-slate-900 dark:text-white" : "font-medium text-slate-500 group-hover:text-slate-800"
-                  )}
-                >
-                  Reports
-                </span>
-              </Link>
-
-              {/* Users */}
-              <Link
-                href="/employees/"
-                className="flex flex-col items-center gap-1.5 group w-full"
-              >
-                <div
-                  className={cn(
-                    "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
-                    activeNavHref === "/employees/"
-                      ? "bg-gradient-to-br from-[#f25c27] to-[#e64a19] text-white shadow-md shadow-orange-500/30 scale-105"
-                      : "text-slate-400 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-zinc-800"
-                  )}
-                >
-                  <Users className="w-5 h-5" />
-                </div>
-                <span
-                  className={cn(
-                    "text-[10px] tracking-tight leading-none transition-colors",
-                    activeNavHref === "/employees/" ? "font-bold text-slate-900 dark:text-white" : "font-medium text-slate-500 group-hover:text-slate-800"
-                  )}
-                >
-                  Users
-                </span>
-              </Link>
-
-              {/* Settings */}
-              <Link
-                href="/settings/"
-                className="flex flex-col items-center gap-1.5 group w-full"
-              >
-                <div
-                  className={cn(
-                    "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
-                    activeNavHref === "/settings/"
-                      ? "bg-gradient-to-br from-[#f25c27] to-[#e64a19] text-white shadow-md shadow-orange-500/30 scale-105"
-                      : "text-slate-400 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-zinc-800"
-                  )}
-                >
-                  <Settings className="w-5 h-5" />
-                </div>
-                <span
-                  className={cn(
-                    "text-[10px] tracking-tight leading-none transition-colors",
-                    activeNavHref === "/settings/" ? "font-bold text-slate-900 dark:text-white" : "font-medium text-slate-500 group-hover:text-slate-800"
-                  )}
-                >
-                  Settings
-                </span>
-              </Link>
+              {visibleNavItems.map((item) => {
+                const isActive = activeNavHref === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    data-href={item.href}
+                    title={t(item.labelKey)}
+                    className="flex flex-col items-center gap-1.5 group w-full"
+                  >
+                    <div
+                      className={cn(
+                        "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
+                        isActive
+                          ? "bg-gradient-to-br from-[#f25c27] to-[#e64a19] text-white shadow-md shadow-orange-500/30 scale-105"
+                          : "text-slate-400 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                      )}
+                    >
+                      <item.icon className="w-5 h-5" />
+                    </div>
+                    <span
+                      className={cn(
+                        "text-[10px] tracking-tight leading-none text-center truncate max-w-[72px] px-1 transition-colors",
+                        isActive
+                          ? "font-bold text-slate-900 dark:text-white"
+                          : "font-medium text-slate-500 group-hover:text-slate-800"
+                      )}
+                    >
+                      {t(item.labelKey)}
+                    </span>
+                  </Link>
+                );
+              })}
             </div>
 
             {/* Bottom Actions: Help & Logout */}
@@ -466,24 +345,24 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
                 type="button"
                 onClick={() => showToast("Sant Wamanbhau Parking Terminal v2.4 (Vertix Edition)")}
                 className="flex flex-col items-center gap-1 group text-slate-400 hover:text-slate-800 transition-colors w-full"
-                title="Help & System Info"
+                title={t("common.help")}
               >
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors">
                   <HelpCircle className="w-5 h-5" />
                 </div>
-                <span className="text-[10px] font-medium text-slate-500">Help</span>
+                <span className="text-[10px] font-medium text-slate-500">{t("common.help")}</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsSwitchModalOpen(true)}
                 className="flex flex-col items-center gap-1 group text-slate-400 hover:text-red-500 transition-colors w-full"
-                title="Handover & Sign Out"
+                title={t("operatorModal.signOut")}
               >
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
                   <LogOut className="w-5 h-5" />
                 </div>
-                <span className="text-[10px] font-medium text-slate-500 group-hover:text-red-500">Logout</span>
+                <span className="text-[10px] font-medium text-slate-500 group-hover:text-red-500">{t("operatorModal.signOut")}</span>
               </button>
             </div>
           </aside>

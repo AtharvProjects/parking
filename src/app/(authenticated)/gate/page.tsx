@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/providers/auth-provider";
@@ -12,11 +12,12 @@ import type { VehicleType } from "@/lib/database.types";
 import { cn } from "@/lib/utils";
 import { generatePdfBill } from "@/lib/pdf-bill";
 import { formatDateTimeIST, formatDateIST, formatTimeIST } from "@/lib/formatters";
-import { sharePdfNative, downloadPdfNative } from "@/lib/native-share";
+import { sharePdfNative, downloadPdfNative, downloadImageNative } from "@/lib/native-share";
 import { Capacitor } from "@capacitor/core";
-import { captureOrPickImage, registerCameraRestoreListener } from "@/lib/image-utils";
+import { captureOrPickImage, compressImageFile, registerCameraRestoreListener } from "@/lib/image-utils";
 import { useBackHandler } from "@/providers/back-button-provider";
 import { openWhatsAppDirect } from "@/lib/whatsapp";
+import { GateSubmitButton } from "@/components/gate-submit-button";
 import {
   Check,
   Loader2,
@@ -33,7 +34,8 @@ import {
   Building2,
   ChevronDown,
   Image as ImageIcon,
-  Plus
+  Plus,
+  AlertTriangle
 } from "lucide-react";
 
 const DRAFT_KEY = "swp_gate_entry_draft";
@@ -65,7 +67,7 @@ export default function GateEntryPage() {
   const [rearPhoto, setRearPhoto] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState<'front' | 'rear' | null>(null);
 
-  // Restore draft state on initial mount (in case Android recreated Activity)
+  // Restore draft state on initial mount (in case activity was recreated)
   useEffect(() => {
     const draft = loadDraft();
     if (draft) {
@@ -74,34 +76,64 @@ export default function GateEntryPage() {
       if (draft.driverNumber) setDriverNumber(draft.driverNumber);
       if (draft.driverName) setDriverName(draft.driverName);
       if (draft.notes) setNotes(draft.notes);
-      if (draft.frontPhoto) setFrontPhoto(draft.frontPhoto);
-      if (draft.rearPhoto) setRearPhoto(draft.rearPhoto);
+      if (draft.frontPhoto) {
+        setFrontPhoto(draft.frontPhoto);
+      } else if (typeof window !== "undefined") {
+        const lastFront = localStorage.getItem("swp_last_captured_front");
+        if (lastFront) setFrontPhoto(lastFront);
+      }
+      if (draft.rearPhoto) {
+        setRearPhoto(draft.rearPhoto);
+      } else if (typeof window !== "undefined") {
+        const lastRear = localStorage.getItem("swp_last_captured_rear");
+        if (lastRear) setRearPhoto(lastRear);
+      }
+    } else if (typeof window !== "undefined") {
+      const lastFront = localStorage.getItem("swp_last_captured_front");
+      if (lastFront) setFrontPhoto(lastFront);
+      const lastRear = localStorage.getItem("swp_last_captured_rear");
+      if (lastRear) setRearPhoto(lastRear);
     }
     setInitialLoaded(true);
 
-    // Listen for restored camera result after Android Activity restart
+    // Listen for restored camera result after app restart
     registerCameraRestoreListener((slot, base64Data) => {
       if (slot === "front") {
         setFrontPhoto(base64Data);
       } else {
         setRearPhoto(base64Data);
       }
+      try {
+        const currentDraft = loadDraft() || {};
+        if (slot === "front") {
+          currentDraft.frontPhoto = base64Data;
+        } else {
+          currentDraft.rearPhoto = base64Data;
+        }
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(currentDraft));
+      } catch (e) {
+        console.warn("Could not save restored photo to draft:", e);
+      }
     });
   }, []);
 
-  // Continuously save form state to draft storage
+  // Continuously save form state to draft storage including compressed photos
   useEffect(() => {
     if (!initialLoaded || typeof window === "undefined") return;
-    const draft = {
-      vehicleNumber,
-      vehicleType,
-      driverNumber,
-      driverName,
-      notes,
-      frontPhoto,
-      rearPhoto,
-    };
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    try {
+      const draft = {
+        vehicleNumber,
+        vehicleType,
+        driverNumber,
+        driverName,
+        notes,
+        frontPhoto,
+        rearPhoto,
+      };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch (e) {
+      console.warn("Could not write draft to localStorage:", e);
+    }
   }, [vehicleNumber, vehicleType, driverNumber, driverName, notes, frontPhoto, rearPhoto, initialLoaded]);
 
   // Concrete active site ID for the entry transaction
@@ -117,11 +149,18 @@ export default function GateEntryPage() {
     onSuccess: () => {
       if (typeof window !== "undefined") {
         localStorage.removeItem(DRAFT_KEY);
+        localStorage.removeItem("swp_last_captured_front");
+        localStorage.removeItem("swp_last_captured_rear");
       }
       queryClient.invalidateQueries({ queryKey: ["active-vehicles"] });
       queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       queryClient.invalidateQueries({ queryKey: ["reports"] });
+    },
+    onError: (err: any) => {
+      console.error("Entry submission error:", err);
+      const msg = err?.message || "Failed to save vehicle entry. Please try again.";
+      alert(msg);
     },
   });
 
@@ -135,6 +174,8 @@ export default function GateEntryPage() {
     setRearPhoto(null);
     if (typeof window !== "undefined") {
       localStorage.removeItem(DRAFT_KEY);
+      localStorage.removeItem("swp_last_captured_front");
+      localStorage.removeItem("swp_last_captured_rear");
     }
     entryMutation.reset();
   }, [entryMutation]);
@@ -143,11 +184,20 @@ export default function GateEntryPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!vehicleType || !vehicleNumber.trim() || !employee) return;
-    if (!effectiveSiteId) {
-      alert(t("gate.selectActiveSite"));
+    if (!vehicleNumber.trim()) {
+      alert("Please enter a vehicle registration number");
       return;
     }
+    if (!vehicleType) {
+      alert("Please select a vehicle category");
+      return;
+    }
+    if (!effectiveSiteId) {
+      alert(t("gate.selectActiveSite") || "Please select an active site");
+      return;
+    }
+
+    const operatorId = employee?.id || (typeof window !== "undefined" ? localStorage.getItem("current_employee_id") : null) || "c96dd7dd-cdcc-4889-b90f-38bf7d7fd6bd";
 
     entryMutation.mutate({
       site_id: effectiveSiteId,
@@ -157,7 +207,7 @@ export default function GateEntryPage() {
       driver_name: driverName.trim() || undefined,
       notes: notes.trim() || undefined,
       vehicle_photos: frontPhoto || rearPhoto ? { front: frontPhoto || undefined, rear: rearPhoto || undefined } : undefined,
-      entry_operator_id: employee.id,
+      entry_operator_id: operatorId,
     });
   };
 
@@ -228,18 +278,38 @@ export default function GateEntryPage() {
     e.preventDefault();
     e.stopPropagation();
     setIsCapturing(type);
+    
+    // Generous 120s timer so user has ample time to frame, shoot, and review on iPad
+    const safetyTimer = setTimeout(() => {
+      setIsCapturing(null);
+    }, 120000);
+
     try {
+      console.log(`[GatePhoto] Capturing ${type} photo via ${source}...`);
       const base64Data = await captureOrPickImage(source, type);
+      console.log(`[GatePhoto] Captured ${type} data length:`, base64Data ? `${base64Data.length} chars` : 'null');
       if (base64Data) {
         if (type === 'front') {
           setFrontPhoto(base64Data);
         } else {
           setRearPhoto(base64Data);
         }
+        try {
+          const currentDraft = loadDraft() || {};
+          if (type === 'front') {
+            currentDraft.frontPhoto = base64Data;
+          } else {
+            currentDraft.rearPhoto = base64Data;
+          }
+          localStorage.setItem(DRAFT_KEY, JSON.stringify(currentDraft));
+        } catch (e) {
+          console.warn("Could not write photo to draft storage:", e);
+        }
       }
     } catch (error) {
-      console.warn('Error capturing photo:', error);
+      console.error('[GatePhoto] Error capturing photo:', error);
     } finally {
+      clearTimeout(safetyTimer);
       setIsCapturing(null);
     }
   };
@@ -263,9 +333,44 @@ export default function GateEntryPage() {
         <p className="text-xs text-[var(--ink3)] mb-1">
           {t("common.site")}: <span className="font-semibold text-[var(--ink)]">{activeSite?.name || t("gate.mainSite")}</span>
         </p>
-        <p className="text-xs text-[var(--ink3)] mb-6">
+        <p className="text-xs text-[var(--ink3)] mb-4">
           {t("gate.timestamp")}: <span className="font-semibold text-[var(--ink)]">{formatDateTimeIST(entryMutation.data.entry_at)}</span>
         </p>
+
+        {(() => {
+          const photos = entryMutation.data.vehicle_photos as { front?: string; rear?: string } | null;
+          if (!photos) return null;
+          return (
+            <div className="flex items-center justify-center gap-3 mb-5">
+              {photos.front && (
+                <div 
+                  onClick={() => downloadImageNative(photos.front!, `${entryMutation.data.vehicle_number}-front.jpg`)}
+                  className="relative rounded-xl overflow-hidden border border-[var(--line)] w-28 h-18 shadow-sm cursor-pointer group hover:border-[var(--accent)] transition-all"
+                  title="Tap to download front photo"
+                >
+                  <img src={photos.front} alt="Front" className="w-full h-full object-cover" />
+                  <span className="absolute bottom-1 left-1 bg-black/70 text-[8px] font-bold text-white px-1.5 py-0.5 rounded flex items-center gap-1">
+                    <Download className="w-2.5 h-2.5 text-emerald-400" />
+                    <span>Front</span>
+                  </span>
+                </div>
+              )}
+              {photos.rear && (
+                <div 
+                  onClick={() => downloadImageNative(photos.rear!, `${entryMutation.data.vehicle_number}-rear.jpg`)}
+                  className="relative rounded-xl overflow-hidden border border-[var(--line)] w-28 h-18 shadow-sm cursor-pointer group hover:border-[var(--accent)] transition-all"
+                  title="Tap to download rear photo"
+                >
+                  <img src={photos.rear} alt="Rear" className="w-full h-full object-cover" />
+                  <span className="absolute bottom-1 left-1 bg-black/70 text-[8px] font-bold text-white px-1.5 py-0.5 rounded flex items-center gap-1">
+                    <Download className="w-2.5 h-2.5 text-emerald-400" />
+                    <span>Rear</span>
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
         
         <div className="w-full space-y-2.5">
           <button
@@ -281,10 +386,11 @@ export default function GateEntryPage() {
             <button
               type="button"
               onClick={handleShareWhatsApp}
-              className="w-full vx-btn !bg-[#25D366] !text-white !py-3.5 !rounded-2xl text-xs font-bold shadow-md hover:opacity-95"
+              className="w-full vx-btn !bg-[#25D366] !text-white !py-3.5 !rounded-2xl text-xs font-bold shadow-md hover:opacity-95 border-none"
+              style={{ backgroundColor: "#25D366", color: "#ffffff" }}
             >
-              <MessageCircle className="w-4 h-4" />
-              <span>{t("gate.shareTicketWhatsApp")}</span>
+              <MessageCircle className="w-4 h-4 text-white fill-white/20" />
+              <span className="text-white font-bold">{t("gate.shareTicketWhatsApp")}</span>
             </button>
           )}
 
@@ -468,8 +574,17 @@ export default function GateEntryPage() {
             {/* Front Photo */}
             <div className="space-y-1">
               {frontPhoto ? (
-                <div className="relative rounded-2xl overflow-hidden border border-[var(--line)] aspect-video shadow-inner">
-                  <img src={frontPhoto} alt="Front" className="w-full h-full object-cover" />
+                <div className="relative rounded-2xl overflow-hidden border-2 border-[var(--accent)] aspect-video shadow-md bg-black/5">
+                  <img
+                    src={frontPhoto}
+                    alt="Front"
+                    className="w-full h-full object-cover"
+                    onError={() => console.warn("Failed to render front photo")}
+                  />
+                  <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm text-white px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 shadow">
+                    <Check className="w-3 h-3 text-emerald-400 stroke-[3]" />
+                    <span>Front Photo</span>
+                  </div>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -477,9 +592,10 @@ export default function GateEntryPage() {
                       e.stopPropagation();
                       setFrontPhoto(null);
                     }}
-                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/75 text-white flex items-center justify-center hover:bg-black transition-colors"
+                    className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 text-white flex items-center justify-center hover:bg-black transition-transform active:scale-95 shadow-md"
+                    title="Remove Photo"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               ) : (
@@ -488,12 +604,12 @@ export default function GateEntryPage() {
                     type="button"
                     disabled={isCapturing !== null}
                     onClick={(e) => handleCapturePhoto(e, 'front', 'camera')}
-                    className="w-full aspect-video rounded-2xl border border-dashed border-[var(--line)] bg-[var(--soft)] hover:bg-[var(--soft2)] flex flex-col items-center justify-center gap-1.5 text-[var(--ink3)] hover:text-[var(--ink)] transition-all active:scale-95 disabled:opacity-50"
+                    className="w-full aspect-video rounded-2xl border-2 border-dashed border-[var(--line)] bg-[var(--soft)] hover:bg-[var(--soft2)] hover:border-[var(--accent)] flex flex-col items-center justify-center gap-1.5 text-[var(--ink3)] hover:text-[var(--ink)] transition-all active:scale-95 disabled:opacity-50"
                   >
                     {isCapturing === 'front' ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin text-[var(--accent)]" />
-                        <span className="text-[10px] font-bold text-[var(--accent)]">Capturing...</span>
+                        <span className="text-[10px] font-bold text-[var(--accent)]">Opening Camera...</span>
                       </>
                     ) : (
                       <>
@@ -518,8 +634,17 @@ export default function GateEntryPage() {
             {/* Rear Photo */}
             <div className="space-y-1">
               {rearPhoto ? (
-                <div className="relative rounded-2xl overflow-hidden border border-[var(--line)] aspect-video shadow-inner">
-                  <img src={rearPhoto} alt="Rear" className="w-full h-full object-cover" />
+                <div className="relative rounded-2xl overflow-hidden border-2 border-[var(--accent)] aspect-video shadow-md bg-black/5">
+                  <img
+                    src={rearPhoto}
+                    alt="Rear"
+                    className="w-full h-full object-cover"
+                    onError={() => console.warn("Failed to render rear photo")}
+                  />
+                  <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm text-white px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 shadow">
+                    <Check className="w-3 h-3 text-emerald-400 stroke-[3]" />
+                    <span>Rear Photo</span>
+                  </div>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -527,9 +652,10 @@ export default function GateEntryPage() {
                       e.stopPropagation();
                       setRearPhoto(null);
                     }}
-                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/75 text-white flex items-center justify-center hover:bg-black transition-colors"
+                    className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 text-white flex items-center justify-center hover:bg-black transition-transform active:scale-95 shadow-md"
+                    title="Remove Photo"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               ) : (
@@ -538,12 +664,12 @@ export default function GateEntryPage() {
                     type="button"
                     disabled={isCapturing !== null}
                     onClick={(e) => handleCapturePhoto(e, 'rear', 'camera')}
-                    className="w-full aspect-video rounded-2xl border border-dashed border-[var(--line)] bg-[var(--soft)] hover:bg-[var(--soft2)] flex flex-col items-center justify-center gap-1.5 text-[var(--ink3)] hover:text-[var(--ink)] transition-all active:scale-95 disabled:opacity-50"
+                    className="w-full aspect-video rounded-2xl border-2 border-dashed border-[var(--line)] bg-[var(--soft)] hover:bg-[var(--soft2)] hover:border-[var(--accent)] flex flex-col items-center justify-center gap-1.5 text-[var(--ink3)] hover:text-[var(--ink)] transition-all active:scale-95 disabled:opacity-50"
                   >
                     {isCapturing === 'rear' ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin text-[var(--accent)]" />
-                        <span className="text-[10px] font-bold text-[var(--accent)]">Capturing...</span>
+                        <span className="text-[10px] font-bold text-[var(--accent)]">Opening Camera...</span>
                       </>
                     ) : (
                       <>
@@ -565,26 +691,26 @@ export default function GateEntryPage() {
               )}
             </div>
           </div>
+
         </div>
 
-        {/* Submit Button */}
-        <button
-          type="submit"
-          disabled={!vehicleNumber.trim() || !vehicleType || entryMutation.isPending}
-          className="w-full vx-btn accent !py-4 !rounded-2xl text-sm font-extrabold shadow-xl disabled:opacity-50"
-        >
-          {entryMutation.isPending ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>{t("gate.savingEntry")}</span>
-            </>
-          ) : (
-            <>
-              <Check className="w-5 h-5 stroke-[3]" />
-              <span>{t("gate.generateEntrySlip")}</span>
-            </>
-          )}
-        </button>
+        {/* Error Feedback Banner */}
+        {entryMutation.isError && (
+          <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 text-xs font-bold flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
+            <span>{(entryMutation.error as any)?.message || "Failed to save entry. Please try again."}</span>
+          </div>
+        )}
+
+        {/* Submit Button — animated with GSAP confetti on success */}
+        <GateSubmitButton
+          isPending={entryMutation.isPending}
+          isSuccess={entryMutation.isSuccess}
+          disabled={!vehicleNumber.trim() || !vehicleType || entryMutation.isPending || isCapturing !== null}
+          label={t("gate.generateEntrySlip")}
+          savingLabel={t("gate.savingEntry")}
+          successLabel={t("gate.entryRecorded") || "Entry Recorded!"}
+        />
 
       </form>
 

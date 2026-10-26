@@ -4,9 +4,9 @@ import React from "react";
 import { formatINR, formatDateTimeIST, formatDateIST } from "@/lib/formatters";
 import type { SessionWithRelations } from "@/lib/database.types";
 import { BUSINESS_NAME } from "@/lib/constants";
-import { Printer, MessageCircle, X, Download, Calendar, Clock, Building2, User } from "lucide-react";
+import { Printer, MessageCircle, X, Download, Calendar, Clock, Building2, User, Camera } from "lucide-react";
 import { generatePdfBill } from "@/lib/pdf-bill";
-import { sharePdfNative, downloadPdfNative } from "@/lib/native-share";
+import { sharePdfNative, downloadPdfNative, downloadImageNative } from "@/lib/native-share";
 import { Capacitor } from "@capacitor/core";
 import { useQuery } from "@tanstack/react-query";
 import { sitesService } from "@/services/sites.service";
@@ -224,7 +224,61 @@ export function BillReceiptModal({
               </div>
             </div>
           )}
-          
+
+          {/* Vehicle Captured Photos */}
+          {(() => {
+            const photos = typeof session.vehicle_photos === 'string'
+              ? (() => { try { return JSON.parse(session.vehicle_photos); } catch { return null; } })()
+              : (session.vehicle_photos as { front?: string; rear?: string } | null);
+            if (!photos?.front && !photos?.rear) return null;
+            return (
+              <div className="pt-2 border-t border-dashed border-slate-200">
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-primary" />
+                  <span>Captured Vehicle Photos</span>
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {photos.front && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold text-slate-500 block">Front View</span>
+                        <button
+                          type="button"
+                          onClick={() => downloadImageNative(photos.front!, `receipt-${session.vehicle_number}-front.jpg`)}
+                          className="text-[9px] font-bold text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                        >
+                          <Download className="w-2.5 h-2.5" />
+                          <span>Save</span>
+                        </button>
+                      </div>
+                      <div className="rounded-xl overflow-hidden border border-slate-200 aspect-video bg-black/5 shadow-xs">
+                        <img src={photos.front} alt="Front View" className="w-full h-full object-cover" />
+                      </div>
+                    </div>
+                  )}
+                  {photos.rear && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold text-slate-500 block">Rear View</span>
+                        <button
+                          type="button"
+                          onClick={() => downloadImageNative(photos.rear!, `receipt-${session.vehicle_number}-rear.jpg`)}
+                          className="text-[9px] font-bold text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                        >
+                          <Download className="w-2.5 h-2.5" />
+                          <span>Save</span>
+                        </button>
+                      </div>
+                      <div className="rounded-xl overflow-hidden border border-slate-200 aspect-video bg-black/5 shadow-xs">
+                        <img src={photos.rear} alt="Rear View" className="w-full h-full object-cover" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="pt-2 text-center text-[10px] text-slate-400 print:text-black space-y-1">
             <p>{t("pdf.thankYou")}</p>
             <p className="font-medium text-slate-500">{t("common.operator")}: {operatorName}</p>
@@ -236,29 +290,33 @@ export function BillReceiptModal({
           {session.driver_number && (
             <button 
               onClick={handleWhatsAppShare} 
-              className="pill w-full flex items-center justify-center gap-2 py-2.5 bg-[#25D366] text-white text-xs font-bold shadow-sm hover:opacity-95 transition-opacity"
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-full text-xs font-extrabold shadow-md active:scale-95 transition-all cursor-pointer border-none"
+              style={{ backgroundColor: "#25D366", color: "#ffffff" }}
             >
-              <MessageCircle className="w-4 h-4" />
-              {t("modals.shareBillWhatsApp")}
+              <MessageCircle className="w-4 h-4 text-white fill-white/20" />
+              <span className="text-white font-bold tracking-wide">{t("modals.shareBillWhatsApp")}</span>
             </button>
           )}
           <div className="grid grid-cols-2 gap-2">
             <button 
               onClick={handleDownload} 
-              className="pill flex items-center justify-center gap-1.5 py-2.5 border border-slate-200 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 transition-colors"
+              className="flex items-center justify-center gap-1.5 py-2.5 rounded-full border border-slate-300 text-xs font-bold text-slate-800 bg-white hover:bg-slate-100 transition-colors shadow-sm active:scale-95 cursor-pointer"
             >
-              <Download className="w-3.5 h-3.5" /> {t("common.download")}
+              <Download className="w-3.5 h-3.5 text-slate-700" />
+              <span>{t("common.download")}</span>
             </button>
             <button 
               onClick={() => window.print()} 
-              className="vx-btn accent !py-2.5 text-xs font-bold shadow-sm"
+              className="flex items-center justify-center gap-1.5 py-2.5 rounded-full text-xs font-bold text-white shadow-sm active:scale-95 transition-all cursor-pointer border-none"
+              style={{ backgroundColor: "var(--accent, #f25c27)", color: "#ffffff" }}
             >
-              <Printer className="w-3.5 h-3.5" /> {t("modals.printBill")}
+              <Printer className="w-3.5 h-3.5 text-white" />
+              <span className="text-white font-bold">{t("modals.printBill")}</span>
             </button>
           </div>
           <button 
             onClick={onClose} 
-            className="w-full py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+            className="w-full py-2.5 rounded-full text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors active:scale-95 cursor-pointer"
           >
             {t("common.close")} {t("whatsapp.receiptLabel")}
           </button>

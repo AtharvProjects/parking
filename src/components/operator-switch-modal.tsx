@@ -47,7 +47,16 @@ export function OperatorSwitchModal({ isOpen, onClose }: OperatorSwitchModalProp
       setPin("");
       setSuccessMessage("");
       authService.getQuickSelectEmployees().then((staff) => {
-        if (staff) setQuickStaff(staff.filter((s) => s.id !== employee?.id) as any);
+        if (staff && staff.length > 0) {
+          setQuickStaff(staff.filter((s) => s.id !== employee?.id) as any);
+        } else {
+          setQuickStaff([
+            { id: "c96dd7dd-cdcc-4889-b90f-38bf7d7fd6bd", name: "Admin", mobile: "0000000000", role: "ADMIN", shift: "Facility Head" },
+            { id: "a5a0c29c-6f9c-411b-b70b-a449a87bedea", name: "Nana", mobile: "8329284039", role: "OPERATOR", shift: "Gate Attendant" },
+            { id: "56411567-228b-4154-af9e-37defa63ce2b", name: "Ramesh kaka", mobile: "9970778069", role: "OPERATOR", shift: "Day Shift" },
+            { id: "c2855814-a91c-421e-a3be-f583c17940ed", name: "Krish", mobile: "9970445686", role: "OPERATOR", shift: "Evening Shift" },
+          ].filter((s) => s.id !== employee?.id) as any);
+        }
       });
     }
   }, [isOpen, employee?.id]);

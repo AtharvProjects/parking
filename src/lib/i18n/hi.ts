@@ -51,6 +51,7 @@ const hi: TranslationKeys = {
     password: "पासवर्ड",
     site: "स्थान",
     operator: "ऑपरेटर",
+    help: "मदद",
   },
 
   // ─── NAVIGATION ────────────────────────────────────
@@ -110,6 +111,11 @@ const hi: TranslationKeys = {
     errorAuthFailed: "प्रमाणीकरण विफल. अपनी जानकारी जांचें.",
     accountCreated: "खाता बनाया! कृपया पुष्टि के लिए अपना ईमेल जांचें या साइन इन करें.",
     errorResetFailed: "रीसेट लिंक भेजने में विफल. कृपया ईमेल सत्यापित करें.",
+    adminQuickAccess: "एडमिन त्वरित एक्सेस",
+    facilityAdmin: "सुविधा प्रशासक (एडमिन)",
+    oneTapLogin: "१-टैप त्वरित लॉगिन",
+    attendantsOnDuty: "ड्यूटी पर तैनात कर्मचारी",
+    instantUnlock: "तुरंत अनलॉक",
   },
 
   // ─── GATE ENTRY ────────────────────────────────────
@@ -379,8 +385,15 @@ const hi: TranslationKeys = {
     vibration: "कंपन",
     newEntryAlerts: "नया प्रवेश अलर्ट",
     exitAlerts: "निकास अलर्ट",
-    overstayAlerts: "समय पार अलर्ट",
     testNotification: "परीक्षण सूचना",
+    billingRules: "बिलिंग नियम",
+    gracePeriod: "ग्रेस पीरियड (मिनट)",
+    roundingInterval: "राउंडिंग अंतराल (मिनट)",
+    dailySwitchover: "दैनिक स्विचओवर (घंटे)",
+    overstayAlert: "अधिक समय अलर्ट (घंटे)",
+    toggleThemeDesc: "लाइट और डार्क मोड बदलें",
+    saveSuccess: "सेटिंग्स और दरें सफलतापूर्वक सहेजी गईं!",
+    daily24h: "दैनिक (24 घंटे)",
   },
 
   // ─── PDF BILL ──────────────────────────────────────

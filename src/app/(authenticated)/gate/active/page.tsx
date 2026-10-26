@@ -17,6 +17,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { BillReceiptModal } from "@/components/bill-receipt-modal";
 import { useBackHandler } from "@/providers/back-button-provider";
 import { useLanguage } from "@/providers/language-provider";
+import { AnimatedCount } from "@/components/animated-count";
 import {
   Search,
   Clock,
@@ -37,8 +38,10 @@ import {
   FileText,
   Image as ImageIcon,
   Plus,
-  ChevronRight
+  ChevronRight,
+  Download
 } from "lucide-react";
+import { downloadImageNative } from "@/lib/native-share";
 
 export default function ActiveVehiclesPage() {
   const router = useRouter();
@@ -318,11 +321,16 @@ export default function ActiveVehiclesPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {vehicle.vehicle_photos && (
+                    {(() => {
+                      const p = typeof vehicle.vehicle_photos === 'string'
+                        ? (() => { try { return JSON.parse(vehicle.vehicle_photos); } catch { return null; } })()
+                        : vehicle.vehicle_photos;
+                      return Boolean(p?.front || p?.rear);
+                    })() && (
                       <button
                         type="button"
                         onClick={() => setViewPhotosVehicle(vehicle)}
-                        className="w-8 h-8 rounded-full bg-[var(--soft)] hover:bg-[var(--soft2)] border border-[var(--line)] flex items-center justify-center text-[var(--ink2)] hover:text-[var(--ink)] transition-colors"
+                        className="w-8 h-8 rounded-full bg-[var(--soft)] hover:bg-[var(--soft2)] border border-[var(--line)] flex items-center justify-center text-[var(--accent)] hover:text-[var(--ink)] transition-colors shadow-sm"
                         title={t.activeVehicles.viewPhotos}
                       >
                         <CameraIcon className="w-3.5 h-3.5" />
@@ -395,7 +403,12 @@ export default function ActiveVehiclesPage() {
                 </div>
                 <div className="flex justify-between pt-2.5 border-t border-[var(--line)] text-sm font-bold items-center">
                   <span className="text-[var(--ink)]">{t.activeVehicles.totalBillableAmount}</span>
-                  <span className="text-2xl font-black text-[var(--accent)]">{formatINR(billingResult.grossAmount)}</span>
+                  <AnimatedCount
+                    value={Math.round(billingResult.grossAmount / 100)}
+                    prefix="₹"
+                    duration={400}
+                    className="text-2xl font-black text-[var(--accent)] font-mono"
+                  />
                 </div>
               </div>
 
@@ -520,38 +533,70 @@ export default function ActiveVehiclesPage() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
-              {viewPhotosVehicle.vehicle_photos?.front && (
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-foreground font-bold">{t.activeVehicles.frontView}</span>
-                    <span className="text-[10px] text-primary font-semibold">{t.activeVehicles.entryProof}</span>
+            {(() => {
+              const photos: { front?: string; rear?: string } | null = typeof viewPhotosVehicle.vehicle_photos === 'string'
+                ? (() => { try { return JSON.parse(viewPhotosVehicle.vehicle_photos as string); } catch { return null; } })()
+                : (viewPhotosVehicle.vehicle_photos as { front?: string; rear?: string } | null);
+
+              if (!photos?.front && !photos?.rear) {
+                return (
+                  <div className="py-8 text-center text-xs text-muted-foreground font-semibold">
+                    No photo record found for this session.
                   </div>
-                  <div className="rounded-2xl overflow-hidden border border-border bg-black/20 aspect-video flex items-center justify-center">
-                    <img 
-                      src={viewPhotosVehicle.vehicle_photos.front} 
-                      alt={t.activeVehicles.frontView} 
-                      className="w-full h-full object-contain" 
-                    />
-                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
+                  {photos.front && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-foreground font-bold">{t.activeVehicles.frontView}</span>
+                        <span className="text-[10px] text-primary font-semibold">{t.activeVehicles.entryProof}</span>
+                      </div>
+                      <div className="rounded-2xl overflow-hidden border border-border bg-black/20 aspect-video flex items-center justify-center">
+                        <img 
+                          src={photos.front} 
+                          alt={t.activeVehicles.frontView} 
+                          className="w-full h-full object-contain" 
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => downloadImageNative(photos.front!, `${viewPhotosVehicle.vehicle_number}-front.jpg`)}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-[var(--soft)] hover:bg-[var(--soft2)] text-[var(--ink)] text-xs font-bold border border-[var(--line)] shadow-xs transition-colors active:scale-98 cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5 text-[var(--accent)]" />
+                        <span>Download Front Photo</span>
+                      </button>
+                    </div>
+                  )}
+                  {photos.rear && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-foreground font-bold">{t.activeVehicles.rearView}</span>
+                        <span className="text-[10px] text-primary font-semibold">{t.activeVehicles.entryProof}</span>
+                      </div>
+                      <div className="rounded-2xl overflow-hidden border border-border bg-black/20 aspect-video flex items-center justify-center">
+                        <img 
+                          src={photos.rear} 
+                          alt={t.activeVehicles.rearView} 
+                          className="w-full h-full object-contain" 
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => downloadImageNative(photos.rear!, `${viewPhotosVehicle.vehicle_number}-rear.jpg`)}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-[var(--soft)] hover:bg-[var(--soft2)] text-[var(--ink)] text-xs font-bold border border-[var(--line)] shadow-xs transition-colors active:scale-98 cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5 text-[var(--accent)]" />
+                        <span>Download Rear Photo</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
-              {viewPhotosVehicle.vehicle_photos?.rear && (
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-foreground font-bold">{t.activeVehicles.rearView}</span>
-                    <span className="text-[10px] text-primary font-semibold">{t.activeVehicles.entryProof}</span>
-                  </div>
-                  <div className="rounded-2xl overflow-hidden border border-border bg-black/20 aspect-video flex items-center justify-center">
-                    <img 
-                      src={viewPhotosVehicle.vehicle_photos.rear} 
-                      alt={t.activeVehicles.rearView} 
-                      className="w-full h-full object-contain" 
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
+              );
+            })()}
           </div>
         </div>
       )}

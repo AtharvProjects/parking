@@ -2,6 +2,59 @@
 
 import React, { useEffect, useRef, useState } from "react";
 
+/**
+ * Hook to animate a numeric value counting up smoothly from 0 to target.
+ * Uses gentle easeOutQuad curve over 2.2s so the user clearly sees
+ * the numbers increasing slowly and steadily.
+ */
+export function useAnimatedNumber(
+  target: number,
+  duration: number = 2200,
+  delay: number = 150
+): number {
+  const [current, setCurrent] = useState(0);
+  const currentRef = useRef(0);
+  currentRef.current = current;
+  const isFirstRun = useRef(true);
+
+  useEffect(() => {
+    let startTime: number | null = null;
+    let animId: number;
+    // On first mount: start from 0. On subsequent updates: start from current value
+    const startVal = isFirstRun.current ? 0 : currentRef.current;
+    const endVal = target;
+    const animDuration = isFirstRun.current ? duration : Math.min(800, duration);
+    const animDelay = isFirstRun.current ? delay : 0;
+    isFirstRun.current = false;
+
+    const timer = setTimeout(() => {
+      const step = (timestamp: number) => {
+        if (startTime === null) startTime = timestamp;
+        const elapsed = timestamp - startTime;
+        const progress = Math.min(1, elapsed / animDuration);
+        // Gentle easeOutQuad: gradual, steady increase that slows smoothly at the end
+        const eased = 1 - Math.pow(1 - progress, 2);
+        const nextVal = Math.round(startVal + (endVal - startVal) * eased);
+        setCurrent(nextVal);
+
+        if (progress < 1) {
+          animId = requestAnimationFrame(step);
+        } else {
+          setCurrent(endVal);
+        }
+      };
+      animId = requestAnimationFrame(step);
+    }, animDelay);
+
+    return () => {
+      clearTimeout(timer);
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [target, duration, delay]);
+
+  return current;
+}
+
 interface AnimatedCountProps {
   value: number;
   duration?: number;
@@ -15,70 +68,29 @@ interface AnimatedCountProps {
 
 export function AnimatedCount({
   value,
-  duration = 1500,
-  delay = 100,
+  duration = 2200,
+  delay = 150,
   prefix = "",
   suffix = "",
   decimals = 0,
   formatter,
   className = "",
 }: AnimatedCountProps) {
-  const [displayValue, setDisplayValue] = useState<string>(() => {
-    if (formatter) return formatter(0);
-    return `${prefix}0${suffix}`;
-  });
+  const animatedVal = useAnimatedNumber(value, duration, delay);
 
-  const valueRef = useRef(value);
-  valueRef.current = value;
+  let formatted: string;
+  if (formatter) {
+    formatted = formatter(animatedVal);
+  } else {
+    const formattedNumber =
+      decimals > 0
+        ? animatedVal.toLocaleString("en-IN", {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals,
+          })
+        : animatedVal.toLocaleString("en-IN");
+    formatted = `${prefix}${formattedNumber}${suffix}`;
+  }
 
-  useEffect(() => {
-    let startTime: number | null = null;
-    let animId: number;
-    let timerId: NodeJS.Timeout;
-
-    const easeOutExpo = (t: number) => (t === 1 ? 1 : 1 - Math.pow(2, -10 * t));
-
-    const run = () => {
-      const target = valueRef.current;
-      const step = (timestamp: number) => {
-        if (startTime === null) startTime = timestamp;
-        const elapsed = timestamp - startTime;
-        const progress = Math.min(1, Math.max(0, elapsed / duration));
-        const eased = easeOutExpo(progress);
-        const current = target * eased;
-
-        if (formatter) {
-          setDisplayValue(formatter(current));
-        } else {
-          const formattedNumber = decimals > 0
-            ? current.toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
-            : Math.round(current).toLocaleString("en-IN");
-          setDisplayValue(`${prefix}${formattedNumber}${suffix}`);
-        }
-
-        if (progress < 1) {
-          animId = requestAnimationFrame(step);
-        } else {
-          if (formatter) {
-            setDisplayValue(formatter(target));
-          } else {
-            const formattedNumber = decimals > 0
-              ? target.toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
-              : Math.round(target).toLocaleString("en-IN");
-            setDisplayValue(`${prefix}${formattedNumber}${suffix}`);
-          }
-        }
-      };
-      animId = requestAnimationFrame(step);
-    };
-
-    timerId = setTimeout(run, delay);
-
-    return () => {
-      clearTimeout(timerId);
-      if (animId) cancelAnimationFrame(animId);
-    };
-  }, [value, duration, delay, prefix, suffix, decimals, formatter]);
-
-  return <span className={className}>{displayValue}</span>;
+  return <span className={className}>{formatted}</span>;
 }

@@ -49,6 +49,7 @@ const en = {
     password: "Password",
     site: "Site",
     operator: "Operator",
+    help: "Help",
   },
 
   // ─── NAVIGATION ────────────────────────────────────
@@ -108,6 +109,11 @@ const en = {
     errorAuthFailed: "Authentication failed. Check your credentials.",
     accountCreated: "Account created! Please check your email to confirm registration or sign in.",
     errorResetFailed: "Failed to send reset link. Please verify the email.",
+    adminQuickAccess: "Admin Quick Access",
+    facilityAdmin: "Facility Administrator",
+    oneTapLogin: "1-Tap Quick Login",
+    attendantsOnDuty: "Attendants on Duty",
+    instantUnlock: "Instant Unlock",
   },
 
   // ─── GATE ENTRY ────────────────────────────────────
@@ -377,8 +383,15 @@ const en = {
     vibration: "Vibration",
     newEntryAlerts: "New Entry Alerts",
     exitAlerts: "Exit Alerts",
-    overstayAlerts: "Overstay Alerts",
     testNotification: "Test Notification",
+    billingRules: "Billing Rules",
+    gracePeriod: "Grace Period (mins)",
+    roundingInterval: "Rounding Interval (mins)",
+    dailySwitchover: "Daily Switchover (hrs)",
+    overstayAlert: "Overstay Alert (hrs)",
+    toggleThemeDesc: "Toggle between light and dark appearance",
+    saveSuccess: "Settings and Rates saved successfully!",
+    daily24h: "Daily (24h)",
   },
 
   // ─── PDF BILL ──────────────────────────────────────

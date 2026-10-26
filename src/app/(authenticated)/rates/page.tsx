@@ -70,9 +70,6 @@ export default function RatesPage() {
         </button>
       </div>
 
-
-      {isLoading && <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="skeleton h-28 rounded-2xl" />)}</div>}
-
       {/* Active Rates */}
       <div>
         <h2 className="text-label text-foreground mb-3 flex items-center gap-2"><CreditCard className="w-4 h-4" /> {t("rates.currentRates")}</h2>

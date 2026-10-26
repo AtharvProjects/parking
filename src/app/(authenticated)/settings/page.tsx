@@ -32,17 +32,16 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 
   const isAdmin = hasPermission(employee?.role, 'SETTINGS');
+  const { t } = useLanguage();
 
   const tabs: { id: SettingsTab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
-    { id: "general", label: "General", icon: <Building className="w-4 h-4" /> },
-    { id: "notifications", label: "Alerts", icon: <Bell className="w-4 h-4" /> },
-    { id: "sites", label: "Sites", icon: <MapPin className="w-4 h-4" />, adminOnly: true },
-    { id: "users", label: "Users", icon: <Users className="w-4 h-4" />, adminOnly: true },
+    { id: "general", label: t("settings.general"), icon: <Building className="w-4 h-4" /> },
+    { id: "notifications", label: t("settings.alerts"), icon: <Bell className="w-4 h-4" /> },
+    { id: "sites", label: t("settings.sites"), icon: <MapPin className="w-4 h-4" />, adminOnly: true },
+    { id: "users", label: t("settings.users"), icon: <Users className="w-4 h-4" />, adminOnly: true },
   ];
 
-  const visibleTabs = tabs.filter(t => !t.adminOnly || isAdmin);
-
-  const { t } = useLanguage();
+  const visibleTabs = tabs.filter(tab => !tab.adminOnly || isAdmin);
 
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto pb-36 font-sans space-y-6">
@@ -148,7 +147,7 @@ function GeneralTab() {
       queryClient.invalidateQueries({ queryKey: ["site"] });
       queryClient.invalidateQueries({ queryKey: ["active-rates"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-      alert("Settings and Rates saved successfully!");
+      alert(t("settings.saveSuccess"));
     },
   });
 
@@ -177,12 +176,12 @@ function GeneralTab() {
       {/* App Theme */}
       <div className="vx-card p-5">
         <h2 className="text-sm font-bold text-[var(--ink)] mb-4 flex items-center gap-2">
-          <Moon className="w-4 h-4 text-[var(--accent)]" /> App Theme
+          <Moon className="w-4 h-4 text-[var(--accent)]" /> {t("settings.theme")}
         </h2>
         <div className="flex items-center justify-between p-4 bg-[var(--soft)] rounded-xl border border-[var(--line)]">
           <div>
-            <p className="text-xs font-bold text-[var(--ink)]">Dark Mode</p>
-            <p className="text-[11px] text-[var(--ink3)]">Toggle between light and dark appearance</p>
+            <p className="text-xs font-bold text-[var(--ink)]">{t("settings.darkMode")}</p>
+            <p className="text-[11px] text-[var(--ink3)]">{t("settings.toggleThemeDesc")}</p>
           </div>
           <button
             type="button"
@@ -224,30 +223,30 @@ function GeneralTab() {
       {/* Business Info */}
       <div className="vx-card p-5">
         <h2 className="text-sm font-bold text-[var(--ink)] mb-4 flex items-center gap-2">
-          <Building className="w-4 h-4 text-[var(--accent)]" /> Business Info
+          <Building className="w-4 h-4 text-[var(--accent)]" /> {t("settings.siteDetails")}
         </h2>
         <div className="space-y-4">
           <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">Business Name</label>
+            <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">{t("settings.siteName")}</label>
             <input type="text" name="name" value={formData.name || ""} onChange={handleChange} className="w-full h-11 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">Contact Number</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">{t("settings.contactNumber")}</label>
               <input type="text" name="contact_number" value={formData.contact_number || ""} onChange={handleChange} placeholder="+91 9999999999" className="w-full h-11 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]" />
             </div>
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">Brand Name (Receipts)</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">{t("settings.brandName")}</label>
               <input type="text" name="brand_name" value={formData.brand_name || ""} onChange={handleChange} className="w-full h-11 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">City</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">{t("settings.city")}</label>
               <input type="text" name="city" value={formData.city || ""} onChange={handleChange} className="w-full h-11 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]" />
             </div>
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">Total Slots</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">{t("settings.totalSlots")}</label>
               <input type="number" name="total_slots" value={formData.total_slots === 0 ? "" : (formData.total_slots ?? "")} onChange={handleChange} placeholder="0" className="w-full h-11 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]" />
             </div>
           </div>
@@ -257,26 +256,26 @@ function GeneralTab() {
       {/* Billing Rules */}
       <div className="vx-card p-5">
         <h2 className="text-sm font-bold text-[var(--ink)] mb-4 flex items-center gap-2">
-          <CreditCard className="w-4 h-4 text-[var(--accent)]" /> Billing Rules
+          <CreditCard className="w-4 h-4 text-[var(--accent)]" /> {t("settings.billingRules")}
         </h2>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">Grace Period (mins)</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">{t("settings.gracePeriod")}</label>
               <input type="number" name="grace_period_minutes" value={formData.grace_period_minutes === 0 ? "" : (formData.grace_period_minutes ?? "")} onChange={handleChange} placeholder="0" className="w-full h-11 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]" />
             </div>
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">Rounding Interval (mins)</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">{t("settings.roundingInterval")}</label>
               <input type="number" name="rounding_interval_min" value={formData.rounding_interval_min === 0 ? "" : (formData.rounding_interval_min ?? "")} onChange={handleChange} placeholder="0" className="w-full h-11 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">Daily Switch (hrs)</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">{t("settings.dailySwitchover")}</label>
               <input type="number" name="day_rate_switchover_hrs" value={formData.day_rate_switchover_hrs === 0 ? "" : (formData.day_rate_switchover_hrs ?? "")} onChange={handleChange} placeholder="0" className="w-full h-11 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]" />
             </div>
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">Overstay Alert (hrs)</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] block mb-1.5">{t("settings.overstayAlert")}</label>
               <input type="number" name="overstay_alert_hrs" value={formData.overstay_alert_hrs === 0 ? "" : (formData.overstay_alert_hrs ?? "")} onChange={handleChange} placeholder="0" className="w-full h-11 px-3.5 rounded-xl border border-[var(--line)] bg-[var(--soft)] text-[var(--ink)] text-sm focus:outline-none focus:border-[var(--accent)]" />
             </div>
           </div>
@@ -286,7 +285,7 @@ function GeneralTab() {
       {/* Parking Rates */}
       <div className="vx-card p-5">
         <h2 className="text-sm font-bold text-[var(--ink)] mb-4 flex items-center gap-2">
-          <Car className="w-4 h-4 text-[var(--accent)]" /> Parking Rates (₹)
+          <Car className="w-4 h-4 text-[var(--accent)]" /> {t("settings.parkingRates")} (₹)
         </h2>
         <div className="space-y-3">
           {["TRAILOR", "BODY_VEHICLE", "EICHER"].map((vType) => (
@@ -295,7 +294,7 @@ function GeneralTab() {
                 <label className="text-xs font-bold text-[var(--ink)] block mb-1">{vType.replace('_', ' ')}</label>
               </div>
               <div>
-                <label className="text-[10px] font-bold uppercase text-[var(--ink3)] block mb-1">Hourly</label>
+                <label className="text-[10px] font-bold uppercase text-[var(--ink3)] block mb-1">{t("settings.hourlyRate")}</label>
                 <input 
                   type="number" 
                   value={rates[vType]?.hourly === 0 ? "" : (rates[vType]?.hourly ?? "")} 
@@ -305,7 +304,7 @@ function GeneralTab() {
                 />
               </div>
               <div>
-                <label className="text-[10px] font-bold uppercase text-[var(--ink3)] block mb-1">Daily (24h)</label>
+                <label className="text-[10px] font-bold uppercase text-[var(--ink3)] block mb-1">{t("settings.daily24h")}</label>
                 <input 
                   type="number" 
                   value={rates[vType]?.daily === 0 ? "" : (rates[vType]?.daily ?? "")} 
@@ -324,7 +323,7 @@ function GeneralTab() {
         disabled={updateMutation.isPending}
         className="w-full vx-btn accent !py-3.5 !rounded-2xl text-sm font-bold shadow-lg shadow-[var(--accent)]/20"
       >
-        {updateMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-4 h-4" /> Save Settings</>}
+        {updateMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-4 h-4" /> {t("settings.saveChanges")}</>}
       </button>
     </form>
   );

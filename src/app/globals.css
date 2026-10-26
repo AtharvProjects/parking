@@ -910,3 +910,41 @@ html, body {
 /* Hide scrollbar */
 .hide-scrollbar::-webkit-scrollbar { display: none; }
 .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ─── NATIVE IPAD & MOBILE APP FEEL ENHANCEMENTS ─────────────────── */
+html, body {
+  overscroll-behavior-y: none;
+  -webkit-overflow-scrolling: touch;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input, textarea {
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
+/* Native tactile button press */
+button, .vx-btn, .pill, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button:active, .vx-btn:active {
+  transform: scale(0.97);
+  transition: transform 0.1s cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Native glassmorphism blur */
+.ios-glass {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background-color: rgba(255, 255, 255, 0.75);
+}
+
+.dark .ios-glass {
+  background-color: rgba(18, 18, 22, 0.75);
+}
+

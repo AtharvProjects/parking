@@ -3,9 +3,26 @@ import { supabase } from '@/lib/supabase';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { SyncQueue } from './queue';
 
+/**
+ * SyncEngine: Manages local SQLite ↔ Supabase synchronization.
+ *
+ * Architecture:
+ * - pushSync(): Reads pending items from sync_queue, pushes to Supabase
+ * - pullSync(): Fetches remote changes since last sync, writes to local SQLite
+ * - startBackgroundSync(): Periodic push/pull (every 60s) + initial sync on start
+ *
+ * IMPORTANT: Realtime subscriptions are NOT managed here.
+ * RealtimeProvider (in src/providers/realtime-provider.tsx) handles all
+ * Supabase Realtime channels and React Query invalidations.
+ * This engine only handles the SQLite local persistence layer for offline support.
+ *
+ * Removing the duplicate Realtime channel that previously existed here prevents:
+ * - Double event processing (each DB change triggering pullSync + React Query invalidation)
+ * - Memory leaks from competing channel registrations
+ * - Race conditions in local SQLite writes triggered by duplicate events
+ */
 export class SyncEngine {
-  static syncInterval: any = null;
-  static activeChannel: any = null;
+  static syncInterval: ReturnType<typeof setInterval> | null = null;
   static isPushing: boolean = false;
   static isPulling: boolean = false;
   static lastSyncKey = 'last_sync_at';
@@ -15,7 +32,7 @@ export class SyncEngine {
     this.isPushing = true;
     try {
       const db = await getDB();
-      
+
       // Get pending jobs
       const result = await db.query(`SELECT * FROM sync_queue WHERE status = 'PENDING' ORDER BY created_at ASC`);
       const jobs = result.values || [];
@@ -29,20 +46,20 @@ export class SyncEngine {
             const photos = typeof payload.vehicle_photos === 'string' ? JSON.parse(payload.vehicle_photos) : payload.vehicle_photos;
             const updatedPhotos = { ...photos };
             let photosChanged = false;
-            
+
             for (const key of ['front', 'rear']) {
               if (photos[key] && !photos[key].startsWith('http')) {
                 try {
                   const file = await Filesystem.readFile({ path: photos[key], directory: Directory.Data });
                   const base64Response = await fetch(`data:image/jpeg;base64,${file.data}`);
                   const blob = await base64Response.blob();
-                  
+
                   const path = `${payload.company_id}/${payload.site_id}/${photos[key]}`;
                   const { data, error } = await supabase.storage.from('parking_assets').upload(path, blob, {
                     upsert: true,
                     contentType: 'image/jpeg'
                   });
-                  
+
                   if (!error && data) {
                     const { data: urlData } = await supabase.storage.from('parking_assets').createSignedUrl(path, 315360000); // 10 years
                     if (urlData) {
@@ -55,64 +72,45 @@ export class SyncEngine {
                 }
               }
             }
-            
+
             if (photosChanged) {
               payload.vehicle_photos = updatedPhotos;
             }
           }
 
           if (job.operation === 'INSERT') {
-            // @ts-ignore
-            let { error } = await supabase.from(job.table_name).insert(payload);
-            if (error && (error.message?.includes('driver_name') || error.message?.includes('base_salary') || (error as any).code === 'PGRST204')) {
-              const fallback = { ...payload };
-              delete fallback.driver_name;
-              delete fallback.base_salary;
-              delete fallback.salary_type;
-              delete fallback.designation;
-              delete fallback.joining_date;
-              // @ts-ignore
-              const res = await supabase.from(job.table_name).insert(fallback);
-              error = res.error;
+            const { error } = await (supabase.from(job.table_name as any) as any).insert(payload);
+            if (error) {
+              // 23505 = unique constraint violation (already synced). Treat as success.
+              if (error.code !== '23505') throw error;
             }
-            // 23505 is PostgreSQL unique constraint violation (duplicate primary key). 
-            // If it already exists, consider it a successful sync.
-            if (error && error.code !== '23505') throw error;
           } else if (job.operation === 'UPDATE') {
-            // @ts-ignore
-            let { error } = await supabase.from(job.table_name).update(payload).eq('id', payload.id);
-            if (error && (error.message?.includes('driver_name') || error.message?.includes('base_salary') || (error as any).code === 'PGRST204')) {
-              const fallback = { ...payload };
-              delete fallback.driver_name;
-              delete fallback.base_salary;
-              delete fallback.salary_type;
-              delete fallback.designation;
-              delete fallback.joining_date;
-              // @ts-ignore
-              const res = await supabase.from(job.table_name).update(fallback).eq('id', payload.id);
-              error = res.error;
-            }
+            const { error } = await (supabase.from(job.table_name as any) as any).update(payload).eq('id', payload.id);
+            if (error) throw error;
+          } else if (job.operation === 'DELETE') {
+            const { error } = await (supabase.from(job.table_name as any) as any).delete().eq('id', payload.id);
             if (error) throw error;
           }
-        
+
           // Mark complete
           await db.executeSet([{
             statement: `UPDATE sync_queue SET status = 'COMPLETED' WHERE id = ?`,
             values: [job.id]
           }]);
 
-        } catch (error: any) {
-          console.error(`Sync Job Failed for ${job.table_name} ${job.operation}`, error);
+        } catch (error: unknown) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          console.error(`Sync Job Failed for ${job.table_name} ${job.operation}:`, errMsg);
           await db.executeSet([{
             statement: `UPDATE sync_queue SET retry_count = retry_count + 1, status = CASE WHEN retry_count >= 5 THEN 'FAILED' ELSE 'PENDING' END WHERE id = ?`,
             values: [job.id]
           }]);
         }
       }
-      
+
       // Cleanup old queue jobs
       await SyncQueue.cleanup();
-      
+
     } finally {
       this.isPushing = false;
     }
@@ -121,11 +119,12 @@ export class SyncEngine {
   static async pullSync(companyId: string) {
     if (this.isPulling) return;
     this.isPulling = true;
-    
+
     const db = await getDB();
     const lastSyncAt = typeof window !== 'undefined' ? localStorage.getItem(this.lastSyncKey) : null;
-    let nextSyncAt = lastSyncAt;
-    
+    // Always record current time as the pull timestamp to avoid clock-skew gaps
+    const pullStartedAt = new Date().toISOString();
+
     let tablesChanged = new Set<string>();
 
     try {
@@ -134,7 +133,7 @@ export class SyncEngine {
         let siteQuery = supabase.from('sites').select('*').eq('company_id', companyId);
         if (lastSyncAt) siteQuery = siteQuery.gt('updated_at', lastSyncAt);
         const { data: sites } = await siteQuery;
-        
+
         if (sites && sites.length > 0) {
           tablesChanged.add('sites');
           const stmts = sites.map(site => ({
@@ -152,7 +151,6 @@ export class SyncEngine {
             values: [site.id, site.company_id, site.name, site.brand_name, site.address, site.city, site.state, site.timezone, site.grace_period_minutes, site.rounding_interval_min, site.day_rate_switchover_hrs, site.overstay_alert_hrs, site.daily_revenue_target, site.total_slots, site.contact_number || null, site.created_at, site.updated_at, site.deleted_at || null]
           }));
           await db.executeSet(stmts);
-          sites.forEach((r: any) => { if (!nextSyncAt || r.updated_at > nextSyncAt) nextSyncAt = r.updated_at; });
         }
       } catch (e) {
         console.warn('Pull sites error:', e);
@@ -163,7 +161,7 @@ export class SyncEngine {
         let rateQuery = supabase.from('rate_cards').select('*').eq('company_id', companyId);
         if (lastSyncAt) rateQuery = rateQuery.gt('updated_at', lastSyncAt);
         const { data: rates } = await rateQuery;
-        
+
         if (rates && rates.length > 0) {
           tablesChanged.add('rate_cards');
           const stmts = rates.map(rate => ({
@@ -178,7 +176,6 @@ export class SyncEngine {
             values: [rate.id, rate.company_id, rate.site_id, rate.vehicle_type, rate.hourly_rate, rate.daily_rate, rate.effective_from, rate.effective_to || null, rate.created_at, rate.updated_at, (rate as any).deleted_at || null]
           }));
           await db.executeSet(stmts);
-          rates.forEach((r: any) => { if (!nextSyncAt || r.updated_at > nextSyncAt) nextSyncAt = r.updated_at; });
         }
       } catch (e) {
         console.warn('Pull rates error:', e);
@@ -189,7 +186,7 @@ export class SyncEngine {
         let empQuery = supabase.from('employees').select('*').eq('company_id', companyId);
         if (lastSyncAt) empQuery = empQuery.gt('updated_at', lastSyncAt);
         const { data: employees } = await empQuery;
-        
+
         if (employees && employees.length > 0) {
           tablesChanged.add('employees');
           const stmts = employees.map(emp => ({
@@ -211,7 +208,6 @@ export class SyncEngine {
             ]
           }));
           await db.executeSet(stmts);
-          employees.forEach((r: any) => { if (!nextSyncAt || r.updated_at > nextSyncAt) nextSyncAt = r.updated_at; });
         }
       } catch (e) {
         console.warn('Pull employees error:', e);
@@ -226,17 +222,17 @@ export class SyncEngine {
           const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
           sessionQuery = sessionQuery.or(`status.eq.ACTIVE,updated_at.gte.${yesterday}`);
         }
-        
+
         const { data: sessions } = await sessionQuery;
-          
+
         if (sessions && sessions.length > 0) {
           tablesChanged.add('parking_sessions');
           const stmts = sessions.map(s => ({
             statement: `
               INSERT INTO parking_sessions (id, company_id, site_id, vehicle_number, vehicle_type, driver_number, driver_name, notes, vehicle_photos, entry_at, entry_operator_id, rate_card_id, status, created_at, updated_at, exit_at, exit_operator_id, duration_minutes, gross_amount, deleted_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              ON CONFLICT(id) DO UPDATE SET 
-                status=excluded.status, 
+              ON CONFLICT(id) DO UPDATE SET
+                status=excluded.status,
                 driver_name=excluded.driver_name,
                 updated_at=excluded.updated_at,
                 exit_at=excluded.exit_at,
@@ -253,11 +249,11 @@ export class SyncEngine {
             ]
           }));
           await db.executeSet(stmts);
-          
+
           // 5. Pull Payments for these sessions
           const sessionIds = sessions.map((s: any) => s.id);
           const chunkSize = 100;
-          let pStmts: any[] = [];
+          const pStmts: any[] = [];
           for (let i = 0; i < sessionIds.length; i += chunkSize) {
             const chunk = sessionIds.slice(i, i + chunkSize);
             const { data: payments } = await supabase.from('payments').select('*').in('session_id', chunk);
@@ -267,8 +263,8 @@ export class SyncEngine {
                 statement: `
                   INSERT INTO payments (id, session_id, status, method, amount, discount_amount, tax_amount, collected_by_id, collected_at, receipt_number, transaction_ref, created_at, updated_at)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                  ON CONFLICT(id) DO UPDATE SET 
-                    status=excluded.status, amount=excluded.amount, discount_amount=excluded.discount_amount, 
+                  ON CONFLICT(id) DO UPDATE SET
+                    status=excluded.status, amount=excluded.amount, discount_amount=excluded.discount_amount,
                     collected_by_id=excluded.collected_by_id, collected_at=excluded.collected_at, updated_at=excluded.updated_at
                 `,
                 values: [p.id, p.session_id, p.status, p.method, p.amount, p.discount_amount, p.tax_amount, p.collected_by_id, p.collected_at, p.receipt_number, p.transaction_ref, p.created_at, p.updated_at]
@@ -278,8 +274,6 @@ export class SyncEngine {
           if (pStmts.length > 0) {
             await db.executeSet(pStmts);
           }
-          
-          sessions.forEach((r: any) => { if (!nextSyncAt || r.updated_at > nextSyncAt) nextSyncAt = r.updated_at; });
         }
       } catch (e) {
         console.warn('Pull sessions error:', e);
@@ -303,7 +297,6 @@ export class SyncEngine {
             values: [att.id, att.company_id, att.site_id, att.employee_id, att.date, att.status, att.check_in, att.check_out, att.shift, att.notes, att.marked_by, att.created_at, att.updated_at]
           }));
           await db.executeSet(stmts);
-          attendanceData.forEach((r: any) => { if (!nextSyncAt || r.updated_at > nextSyncAt) nextSyncAt = r.updated_at; });
         }
       } catch (e) {
         console.warn('Pull attendance error:', e);
@@ -328,73 +321,45 @@ export class SyncEngine {
             values: [tx.id, tx.company_id, tx.site_id, tx.employee_id, tx.type, tx.amount, tx.payment_date, tx.payment_method, tx.month, tx.notes, tx.transaction_ref, tx.recorded_by, tx.created_at, tx.updated_at]
           }));
           await db.executeSet(stmts);
-          txData.forEach((r: any) => { if (!nextSyncAt || r.updated_at > nextSyncAt) nextSyncAt = r.updated_at; });
         }
       } catch (e) {
         console.warn('Pull transactions error:', e);
       }
 
-      // Update last sync time on success
-      if (nextSyncAt && nextSyncAt !== lastSyncAt && typeof window !== 'undefined') {
-        localStorage.setItem(this.lastSyncKey, nextSyncAt);
+      // FIXED: Always update last sync timestamp to pull start time, not data timestamps.
+      // This prevents clock-skew gaps where server timestamps slightly precede pull time.
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(this.lastSyncKey, pullStartedAt);
       }
 
-    } catch (err: any) {
-      console.error('Pull sync failed', err);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error('Pull sync failed:', errMsg);
     } finally {
       this.isPulling = false;
       if (tablesChanged.size > 0 && typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('sync_completed', { 
-          detail: { tables: Array.from(tablesChanged) } 
+        window.dispatchEvent(new CustomEvent('sync_completed', {
+          detail: { tables: Array.from(tablesChanged) }
         }));
       }
     }
   }
 
-  static startRealtimeSubscription(companyId: string) {
-    const channelName = `public:parking_sessions:company_id=eq.${companyId}`;
-    
-    if (this.activeChannel) {
-      supabase.removeChannel(this.activeChannel);
-    }
-    
-    const channels = supabase.getChannels();
-    const existing = channels.find(c => c.topic.includes(channelName));
-    if (existing) {
-      supabase.removeChannel(existing);
-    }
-
-    this.activeChannel = supabase.channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'parking_sessions', filter: `company_id=eq.${companyId}` }, () => {
-        this.pullSync(companyId);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sites', filter: `company_id=eq.${companyId}` }, () => {
-        this.pullSync(companyId);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rate_cards', filter: `company_id=eq.${companyId}` }, () => {
-        this.pullSync(companyId);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees', filter: `company_id=eq.${companyId}` }, () => {
-        this.pullSync(companyId);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => {
-        this.pullSync(companyId);
-      })
-      .subscribe();
-  }
-
-
+  /**
+   * Stop background sync timer.
+   * Note: Realtime subscriptions are managed by RealtimeProvider, not here.
+   */
   static stopBackgroundSync() {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
     }
-    if (this.activeChannel) {
-      supabase.removeChannel(this.activeChannel);
-      this.activeChannel = null;
-    }
   }
 
+  /**
+   * Start background periodic sync.
+   * Does NOT start Realtime subscriptions — those are handled by RealtimeProvider.
+   */
   static startBackgroundSync(companyId: string) {
     this.stopBackgroundSync();
 
@@ -405,10 +370,8 @@ export class SyncEngine {
       }
     }, 60000); // every 60 seconds
 
-    this.startRealtimeSubscription(companyId);
-
     // Run initial sync on startup
-    if (navigator.onLine) {
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
       setTimeout(() => {
         this.pushSync().then(() => this.pullSync(companyId));
       }, 1000);
@@ -416,7 +379,7 @@ export class SyncEngine {
   }
 
   static async triggerPush() {
-    if (navigator.onLine) {
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
       await this.pushSync();
     }
   }

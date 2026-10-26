@@ -21,8 +21,10 @@ import {
   Printer,
   Calendar,
   X,
-  UserCheck
+  UserCheck,
+  Download
 } from "lucide-react";
+import { downloadImageNative } from "@/lib/native-share";
 import { cn } from "@/lib/utils";
 
 // Debounce hook
@@ -223,22 +225,56 @@ export default function SearchPage() {
                       )}
                     </div>
 
-                    {s.vehicle_photos && (
-                      <div className="grid grid-cols-2 gap-2">
-                        {s.vehicle_photos.front && (
-                          <div>
-                            <p className="text-[10px] text-muted-foreground mb-1 font-bold">{t.search.frontView}</p>
-                            <img src={s.vehicle_photos.front} alt={t.search.frontView} className="w-full h-28 object-cover rounded-xl border" />
-                          </div>
-                        )}
-                        {s.vehicle_photos.rear && (
-                          <div>
-                            <p className="text-[10px] text-muted-foreground mb-1 font-bold">{t.search.rearView}</p>
-                            <img src={s.vehicle_photos.rear} alt={t.search.rearView} className="w-full h-28 object-cover rounded-xl border" />
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    {(() => {
+                      const photos = typeof s.vehicle_photos === 'string'
+                        ? (() => { try { return JSON.parse(s.vehicle_photos); } catch { return null; } })()
+                        : s.vehicle_photos;
+                      if (!photos?.front && !photos?.rear) return null;
+                      return (
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          {photos.front && (
+                            <div className="space-y-1">
+                              <p className="text-[10px] text-muted-foreground font-bold">{t.search.frontView}</p>
+                              <div className="relative group rounded-xl overflow-hidden border border-[var(--line)]">
+                                <img src={photos.front} alt={t.search.frontView} className="w-full h-28 object-cover" />
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    downloadImageNative(photos.front!, `${s.vehicle_number}-front.jpg`);
+                                  }}
+                                  className="absolute bottom-1.5 right-1.5 px-2 py-1 rounded-lg bg-black/80 hover:bg-black text-white text-[10px] font-bold flex items-center gap-1 shadow-md transition-transform active:scale-95 cursor-pointer"
+                                  title="Download Front Photo"
+                                >
+                                  <Download className="w-3 h-3 text-emerald-400" />
+                                  <span>Download</span>
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {photos.rear && (
+                            <div className="space-y-1">
+                              <p className="text-[10px] text-muted-foreground font-bold">{t.search.rearView}</p>
+                              <div className="relative group rounded-xl overflow-hidden border border-[var(--line)]">
+                                <img src={photos.rear} alt={t.search.rearView} className="w-full h-28 object-cover" />
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    downloadImageNative(photos.rear!, `${s.vehicle_number}-rear.jpg`);
+                                  }}
+                                  className="absolute bottom-1.5 right-1.5 px-2 py-1 rounded-lg bg-black/80 hover:bg-black text-white text-[10px] font-bold flex items-center gap-1 shadow-md transition-transform active:scale-95 cursor-pointer"
+                                  title="Download Rear Photo"
+                                >
+                                  <Download className="w-3 h-3 text-emerald-400" />
+                                  <span>Download</span>
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* View Receipt Button */}
                     <button

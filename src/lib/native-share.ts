@@ -160,3 +160,74 @@ export async function downloadPdfNative(base64Data: string, filename: string): P
 }
 
 export const downloadNativeFile = downloadPdfNative;
+
+/**
+ * Downloads or saves a vehicle photo to the device.
+ * On native iPadOS / iOS:
+ * - Writes the image file to cache and documents.
+ * - Opens the native iOS system share sheet allowing the user to tap "Save Image"
+ *   (which saves directly to the iPad Camera Roll / Photos app) or "Save to Files".
+ * On Web browsers:
+ * - Triggers an immediate browser image download (.jpg).
+ */
+export async function downloadImageNative(
+  base64OrDataUrl: string,
+  filename = "vehicle-photo.jpg"
+): Promise<boolean> {
+  try {
+    const cleanBase64 = base64OrDataUrl.replace(/^data:image\/[a-zA-Z0-9]+;base64,/, "");
+    const safeFilename = filename.toLowerCase().endsWith(".jpg") || filename.toLowerCase().endsWith(".png")
+      ? filename
+      : `${filename}.jpg`;
+
+    if (Capacitor.isNativePlatform()) {
+      // 1. Write the photo file to Cache
+      const fileResult = await Filesystem.writeFile({
+        path: safeFilename,
+        data: cleanBase64,
+        directory: Directory.Cache,
+      });
+
+      // 2. Also try writing to Documents
+      try {
+        await Filesystem.writeFile({
+          path: safeFilename,
+          data: cleanBase64,
+          directory: Directory.Documents,
+        });
+      } catch (docErr) {
+        console.warn("Writing to Documents directory skipped:", docErr);
+      }
+
+      // 3. Open native iOS Share sheet which includes "Save Image" to Photos / Camera Roll
+      await Share.share({
+        title: safeFilename,
+        text: `Vehicle photo: ${safeFilename}`,
+        url: fileResult.uri,
+        dialogTitle: "Save or Share Photo",
+      });
+
+      return true;
+    } else {
+      // Web browser download
+      const fullDataUrl = base64OrDataUrl.startsWith("data:")
+        ? base64OrDataUrl
+        : `data:image/jpeg;base64,${cleanBase64}`;
+
+      const link = document.createElement("a");
+      link.href = fullDataUrl;
+      link.download = safeFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return true;
+    }
+  } catch (err: any) {
+    if (err?.message && (err.message.includes("canceled") || err.message.includes("cancelled") || err.message.includes("dismiss"))) {
+      return true;
+    }
+    console.error("Error downloading photo:", err);
+    alert("Could not download photo. Please try again.");
+    return false;
+  }
+}

@@ -205,26 +205,48 @@ export function percentChange(oldVal: number, newVal: number): number {
 // ─── LOCAL TIME / IST DATE BOUNDS ────────────────────────
 
 /**
- * Convert a YYYY-MM-DD string into start-of-day (00:00:00.000) or end-of-day (23:59:59.999) ISO string in local time.
+ * Convert a YYYY-MM-DD string into start-of-day (00:00:00.000) or end-of-day (23:59:59.999)
+ * ISO string in IST (Asia/Kolkata, UTC+5:30).
+ *
+ * FIX: Previously used local browser timezone. Now always computes IST-aware UTC timestamps.
+ * IST offset is UTC+5:30 = 330 minutes ahead.
+ * E.g. IST midnight 2025-07-19 00:00:00 = UTC 2025-07-18T18:30:00.000Z
  */
 export function getLocalISOBounds(dateStr: string, isEnd = false): string {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 330 minutes in milliseconds
+
   if (!dateStr) {
-    const now = new Date();
-    return isEnd
-      ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString()
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+    // Use current IST date
+    const nowUTC = new Date();
+    const nowIST = new Date(nowUTC.getTime() + IST_OFFSET_MS);
+    const year = nowIST.getUTCFullYear();
+    const month = nowIST.getUTCMonth();
+    const day = nowIST.getUTCDate();
+    // Compute IST start/end of day, convert to UTC for Supabase query
+    if (isEnd) {
+      const istEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+      return new Date(istEnd.getTime() - IST_OFFSET_MS).toISOString();
+    } else {
+      const istStart = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+      return new Date(istStart.getTime() - IST_OFFSET_MS).toISOString();
+    }
   }
+
   if (dateStr.includes("T")) return new Date(dateStr).toISOString();
 
   const [yearStr, monthStr, dayStr] = dateStr.split("-");
   const year = parseInt(yearStr, 10);
-  const month = parseInt(monthStr, 10) - 1;
+  const month = parseInt(monthStr, 10) - 1; // 0-indexed for Date.UTC
   const day = parseInt(dayStr, 10);
 
   if (isEnd) {
-    return new Date(year, month, day, 23, 59, 59, 999).toISOString();
+    // IST 23:59:59.999 → subtract IST offset to get UTC
+    const istEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+    return new Date(istEnd.getTime() - IST_OFFSET_MS).toISOString();
   }
-  return new Date(year, month, day, 0, 0, 0, 0).toISOString();
+  // IST 00:00:00.000 → subtract IST offset to get UTC
+  const istStart = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+  return new Date(istStart.getTime() - IST_OFFSET_MS).toISOString();
 }
 
 /**

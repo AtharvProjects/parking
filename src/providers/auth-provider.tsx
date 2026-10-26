@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, type React
 import { supabase } from "@/lib/supabase";
 import type { Employee } from "@/lib/database.types";
 import type { Session } from "@supabase/supabase-js";
-import { findEmployeeByIdentifier } from "@/services/auth.service";
+import { verifyPinViaRPC } from "@/services/auth.service";
 
 export interface AuthContextType {
   session: Session | null;
@@ -202,17 +202,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function initAuth() {
       try {
-        // 1. Check Supabase session
-        const { data: { session: initialSession } } = await supabase.auth.getSession();
-        if (initialSession?.user && mounted) {
-          setSession(initialSession);
-          await loadEmployeeFromSupabaseUser(initialSession.user.id, initialSession.user.email || "");
-          return;
-        }
-
-        // 2. Check if a staff member was logged in via PIN (stored in localStorage)
         const savedEmpId = typeof window !== "undefined" ? localStorage.getItem("current_employee_id") : null;
+        const isAdminLoggedIn = typeof window !== "undefined" ? localStorage.getItem("is_admin_logged_in") === "true" : false;
+
+        // 1. Check if a staff member was logged in via PIN (stored in localStorage)
         if (savedEmpId && mounted) {
+          // Ensure booth session is active so RLS allows reading employee and performing operations
+          const boothEmail = process.env.NEXT_PUBLIC_BOOTH_EMAIL || 'admin@santwamanbhau.com';
+          const boothPassword = process.env.NEXT_PUBLIC_BOOTH_PASSWORD || 'Password@123';
+          try {
+            const { data: boothData } = await supabase.auth.signInWithPassword({
+              email: boothEmail,
+              password: boothPassword,
+            });
+            if (boothData?.session && mounted) {
+              setSession(boothData.session);
+            }
+          } catch (e) {
+            console.warn('[Auth] Booth session reconnect notice:', e);
+          }
+
           const { data: emp } = await supabase
             .from('employees')
             .select('*')
@@ -236,7 +245,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        // 2. Check if admin explicitly logged in with email/password
+        if (isAdminLoggedIn && mounted) {
+          const { data: { session: initialSession } } = await supabase.auth.getSession();
+          if (initialSession?.user && mounted) {
+            setSession(initialSession);
+            await loadEmployeeFromSupabaseUser(initialSession.user.id, initialSession.user.email || "");
+            return;
+          }
+        }
+
+        // 3. Neither staff nor admin explicitly logged in — stay on login screen so user can choose!
         if (mounted) {
+          setEmployee(null);
+          setAuthMode(null);
           setStatus("unauthenticated");
         }
       } catch (err) {
@@ -248,17 +270,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth();
 
     // Listen for auth state changes from Supabase
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return;
       setSession(newSession);
+
+      // 1. Never trigger loading screen on background token refresh or focus/visibility events
+      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+        return;
+      }
+
+      // 2. If a staff member is operating via PIN login, the Supabase session is only the background
+      // booth connection for database RLS. Do NOT overwrite the PIN employee with the booth user!
+      const savedEmpId = typeof window !== "undefined" ? localStorage.getItem("current_employee_id") : null;
+      const isAdminLoggedIn = typeof window !== "undefined" ? localStorage.getItem("is_admin_logged_in") === "true" : false;
+
+      if (savedEmpId) {
+        return;
+      }
+
+      // 3. User signed in via password
       if (newSession?.user) {
-        setStatus("loading");
-        try {
-          await loadEmployeeFromSupabaseUser(newSession.user.id, newSession.user.email || "");
-        } catch {
-          // Error already handled
+        if (isAdminLoggedIn) {
+          setEmployee((currentEmp) => {
+            if (!currentEmp) {
+              setStatus("loading");
+              loadEmployeeFromSupabaseUser(newSession.user.id, newSession.user.email || "").catch(() => {});
+            }
+            return currentEmp;
+          });
         }
-      } else if (!localStorage.getItem("current_employee_id")) {
+      } else if (!isAdminLoggedIn) {
         setStatus("unauthenticated");
         setEmployee(null);
         setAuthMode(null);
@@ -292,6 +333,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.session) {
         setSession(data.session);
         setAuthMode("password");
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('is_admin_logged_in', 'true');
+        }
         if (data.user) {
           await loadEmployeeFromSupabaseUser(data.user.id, data.user.email || cleanEmail);
         }
@@ -314,49 +358,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!cleanIdentifier) throw new Error('Please enter your registered mobile number or employee ID.');
       if (!cleanPin || cleanPin.length < 4) throw new Error('PIN must be at least 4 digits.');
 
-      // Ensure active Supabase Auth session for RLS table permissions
-      const { data: currentSession } = await supabase.auth.getSession();
-      if (!currentSession?.session?.user) {
-        try {
-          const { data: autoAuth } = await supabase.auth.signInWithPassword({
-            email: 'admin@santwamanbhau.com',
-            password: 'Password@123'
-          });
-          if (autoAuth?.session) {
-            setSession(autoAuth.session);
-          }
-        } catch (authErr) {
-          console.warn('Background Supabase auth fallback notice:', authErr);
-        }
-      }
+      // Use server-side RPC for secure bcrypt PIN verification.
+      // rpc_verify_pin is granted to anon — no prior Supabase Auth session needed.
+      // This eliminates the need for hardcoded admin credentials in the bundle.
+      const emp = await verifyPinViaRPC(cleanIdentifier, cleanPin);
 
-      // Safe multi-attribute lookup
-      const emp = await findEmployeeByIdentifier(cleanIdentifier);
-
-      if (!emp) {
-        throw new Error('Employee not found. Please check your mobile number or ID.');
-      }
-
-      if (!emp.pin) {
-        throw new Error('No PIN set for this account. Please contact your administrator.');
-      }
-
-      if (emp.pin.trim() !== cleanPin && emp.pin !== cleanPin) {
-        throw new Error('Invalid PIN. Please try again.');
-      }
-
-      // Store session info
+      // Store minimal session info in localStorage for app resume
       if (typeof window !== 'undefined') {
         localStorage.setItem('company_id', emp.company_id);
         localStorage.setItem('current_employee_id', emp.id);
         localStorage.setItem('current_employee_role', emp.role);
+        // Record PIN session creation time for expiry check
+        localStorage.setItem('pin_session_at', new Date().toISOString());
+        if (emp.role === 'ADMIN') {
+          localStorage.setItem('is_admin_logged_in', 'true');
+        } else {
+          localStorage.removeItem('is_admin_logged_in');
+        }
       }
 
-      const safeEmp = { ...emp, pin: '****' };
-      setEmployee(safeEmp as Employee);
+      const safeEmp = { ...emp, pin: '****' } as Employee;
+      const { data: currentSess } = await supabase.auth.getSession();
+      if (currentSess?.session) {
+        setSession(currentSess.session);
+      }
+      setEmployee(safeEmp);
       setAuthMode("pin");
       setStatus("authenticated");
-      return safeEmp as Employee;
+      return safeEmp;
     } catch (err) {
       setStatus("unauthenticated");
       throw err;
@@ -373,26 +402,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!cleanIdentifier) throw new Error('Please enter the incoming operator mobile number.');
     if (!cleanPin || cleanPin.length < 4) throw new Error('PIN must be at least 4 digits.');
 
-    const emp = await findEmployeeByIdentifier(cleanIdentifier);
-
-    if (!emp) {
-      throw new Error('Employee not found.');
-    }
-
-    if (!emp.pin || (emp.pin.trim() !== cleanPin && emp.pin !== cleanPin)) {
-      throw new Error('Invalid PIN.');
-    }
+    // Secure server-side bcrypt PIN verification via RPC
+    const emp = await verifyPinViaRPC(cleanIdentifier, cleanPin);
 
     if (typeof window !== 'undefined') {
       localStorage.setItem('company_id', emp.company_id);
       localStorage.setItem('current_employee_id', emp.id);
       localStorage.setItem('current_employee_role', emp.role);
+      localStorage.setItem('pin_session_at', new Date().toISOString());
     }
 
-    const safeEmp = { ...emp, pin: '****' };
-    setEmployee(safeEmp as Employee);
+    const { data: currentSess } = await supabase.auth.getSession();
+    if (currentSess?.session) {
+      setSession(currentSess.session);
+    }
+
+    const safeEmp = { ...emp, pin: '****' } as Employee;
+    setEmployee(safeEmp);
     setAuthMode("pin");
-    return safeEmp as Employee;
+    return safeEmp;
   }, []);
 
   /**
@@ -421,8 +449,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('current_employee_id');
       localStorage.removeItem('current_employee_role');
+      localStorage.removeItem('is_admin_logged_in');
       localStorage.removeItem('company_id');
       localStorage.removeItem('active_site_id');
+      localStorage.removeItem('pin_session_at');
     }
     setSession(null);
     setEmployee(null);
